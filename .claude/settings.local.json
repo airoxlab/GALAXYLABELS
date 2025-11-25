@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(page.js)",
+      "Bash(database_schema.sql)",
+      "Bash(001_sales_invoices.sql)",
+      "Bash(002_sales_invoice_items.sql)",
+      "Bash(003_sale_orders.sql)",
+      "Bash(004_sale_order_items.sql)",
+      "Bash(powershell -Command:*)",
+      "Bash(dir /b /s 'd:\\Office projects\\Enterprise Resource Planning\\*.js' 2)",
+      "Bash(nul)",
+      "Bash(findstr:*)",
+      "Bash(dir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
