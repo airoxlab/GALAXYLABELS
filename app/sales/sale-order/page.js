@@ -254,10 +254,25 @@ export default function NewSaleOrderPage() {
     setFormData(prev => ({ ...prev, items: newItems }));
   };
 
-  const handleItemChange = (index, field, value) => {
+  const handleItemChange = async (index, field, value) => {
     const newItems = [...formData.items];
     newItems[index][field] = value;
     setFormData(prev => ({ ...prev, items: newItems }));
+
+    // Update product price in database when unit_price is changed
+    if (field === 'unit_price' && newItems[index].product_id) {
+      try {
+        const newPrice = parseFloat(value);
+        if (!isNaN(newPrice) && newPrice >= 0) {
+          await supabase
+            .from('products')
+            .update({ unit_price: newPrice })
+            .eq('id', parseInt(newItems[index].product_id));
+        }
+      } catch (error) {
+        console.error('Error updating product price:', error);
+      }
+    }
   };
 
   const addItem = () => {
@@ -476,15 +491,29 @@ export default function NewSaleOrderPage() {
       // Prepare all parallel operations for finalized orders
       const parallelOperations = [];
 
-      // Update customer balance and ledger for finalized orders
-      if (saveAs === 'finalized' && formData.bill_situation === 'added_to_account') {
-        parallelOperations.push(
-          supabase
-            .from('customers')
-            .update({ current_balance: finalBalance, last_order_date: formData.order_date })
-            .eq('id', formData.customer_id)
-        );
+      // Update customer balance and create ledger entry for finalized orders
+      if (saveAs === 'finalized') {
+        // Only update customer balance if adding to account
+        if (formData.bill_situation === 'added_to_account') {
+          parallelOperations.push(
+            supabase
+              .from('customers')
+              .update({ current_balance: finalBalance, last_order_date: formData.order_date })
+              .eq('id', formData.customer_id)
+          );
+        } else {
+          // For pending orders, just update last order date without changing balance
+          parallelOperations.push(
+            supabase
+              .from('customers')
+              .update({ last_order_date: formData.order_date })
+              .eq('id', formData.customer_id)
+          );
+        }
 
+        // Create ledger entry for ALL finalized orders (regardless of bill_situation)
+        // Use balance based on bill_situation: if pending, balance doesn't change
+        const ledgerBalance = formData.bill_situation === 'added_to_account' ? finalBalance : previousBalance;
         parallelOperations.push(
           supabase.from('customer_ledger').insert([{
             user_id: user.id,
@@ -493,10 +522,10 @@ export default function NewSaleOrderPage() {
             transaction_date: formData.order_date,
             reference_id: order.id,
             reference_no: formData.order_no,
-            debit: total,
+            debit: formData.bill_situation === 'added_to_account' ? total : 0,
             credit: 0,
-            balance: finalBalance,
-            description: `Sale Order ${formData.order_no}`,
+            balance: ledgerBalance,
+            description: `Sale Order ${formData.order_no}${formData.bill_situation === 'pending' ? ' (Pending)' : ''}`,
           }])
         );
       }

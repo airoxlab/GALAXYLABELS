@@ -56,7 +56,7 @@ async function getImageAsBase64(url, maxWidth = 150, quality = 0.7) {
 }
 
 /**
- * Generate a purchase order PDF with professional design
+ * Generate a purchase order PDF with professional design matching sales order
  * @param {Object} purchase - Purchase order data
  * @param {Array} items - Purchase order items
  * @param {Object} settings - Company settings
@@ -67,254 +67,375 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
   const { showLogo = true } = options;
   const doc = new jsPDF();
 
-  // Page dimensions
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
 
-  // Colors - Clean monochrome design like Sales Invoice
-  const primaryColor = [23, 23, 23]; // neutral-900
-  const grayColor = [115, 115, 115]; // neutral-500
-
-  let yPos = 15;
-
-  // Load images in parallel for speed
-  const imagePromises = [];
-
-  if (showLogo && settings?.logo_url) {
-    imagePromises.push(getImageAsBase64(settings.logo_url, 150, 0.7).then(img => ({ type: 'logo', data: img })));
-  }
-
-  // Only load QR if it exists in settings
-  if (settings?.qr_code_url) {
-    imagePromises.push(getImageAsBase64(settings.qr_code_url, 100, 0.8).then(img => ({ type: 'qr', data: img })));
-  }
-
-  // Load signature if exists
-  if (settings?.signature_url) {
-    imagePromises.push(getImageAsBase64(settings.signature_url, 120, 0.8).then(img => ({ type: 'signature', data: img })));
-  }
-
-  const loadedImages = await Promise.all(imagePromises);
+  // Load images
   const images = {};
-  loadedImages.forEach(img => {
-    if (img && img.data) images[img.type] = img.data;
+  if (showLogo && settings?.logo_url) images.logo = await getImageAsBase64(settings.logo_url, 200, 0.9);
+  if (settings?.qr_code_url) images.qr = await getImageAsBase64(settings.qr_code_url, 150, 0.9);
+  if (settings?.signature_url) images.signature = await getImageAsBase64(settings.signature_url, 150, 0.9);
+
+  let totalQty = 0, totalTax = 0, totalAmount = 0;
+  const getCategory = (item) => item.category || item.products?.categories?.name || '';
+
+  // Store item data for custom rendering
+  const itemsData = items.map((item, idx) => {
+    const qty = item.quantity || 0;
+    const price = item.unit_price || 0;
+    const taxPercent = purchase.gst_percentage || 0;
+    const taxAmt = (price * qty * taxPercent) / 100;
+    const amount = (price * qty) + taxAmt;
+    totalQty += qty;
+    totalTax += taxAmt;
+    totalAmount += amount;
+    const category = getCategory(item);
+    return {
+      idx: idx + 1,
+      productName: item.product_name,
+      category: category,
+      qty: qty,
+      unit: item.unit || 'PCS',
+      price: price,
+      taxAmt: taxAmt,
+      taxPercent: taxPercent,
+      amount: amount
+    };
   });
 
-  // Header Section with Logo
-  if (images.logo) {
-    try {
-      doc.addImage(images.logo, 'JPEG', margin, yPos, 25, 25);
-    } catch (e) {
-      console.error('Error adding logo:', e);
-    }
-  }
+  // Header
+  let y = 14;
+  const centerX = pageWidth / 2;
 
-  // Company Name and Details
-  const companyX = images.logo ? margin + 30 : margin;
+  if (images.logo) try { doc.addImage(images.logo, 'JPEG', margin, y, 24, 24); } catch (e) { }
 
   doc.setFontSize(18);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(...primaryColor);
-  doc.text(settings?.company_name || 'COMPANY NAME', companyX, yPos + 8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text(settings?.company_name || 'COMPANY NAME', centerX, y + 8, { align: 'center' });
 
-  doc.setFontSize(8);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(...grayColor);
-
-  const contactLine = [
-    settings?.company_address,
-    settings?.contact_detail_1 ? `Contact # ${settings.contact_detail_1}` : null,
-    settings?.contact_detail_2
-  ].filter(Boolean).join(', ');
-
-  doc.text(contactLine || 'Address, Contact', companyX, yPos + 14);
-
-  const taxLine = [
-    settings?.ntn ? `NTN # ${settings.ntn}` : null,
-    settings?.str ? `STR # ${settings.str}` : null
-  ].filter(Boolean).join('   ');
-
-  if (taxLine) {
-    doc.text(taxLine, companyX, yPos + 19);
-  }
-
-  // QR Code on the right (only if exists in settings)
-  if (images.qr) {
-    try {
-      doc.addImage(images.qr, 'JPEG', pageWidth - margin - 25, yPos, 25, 25);
-    } catch (e) {
-      console.error('Error adding QR:', e);
-    }
-  }
-
-  yPos += 35;
-
-  // Divider line
-  doc.setDrawColor(200, 200, 200);
-  doc.setLineWidth(0.5);
-  doc.line(margin, yPos, pageWidth - margin, yPos);
-
-  yPos += 8;
-
-  // Purchase Order Title - Clean monochrome design
-  doc.setFontSize(14);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(...primaryColor);
-  doc.text('PURCHASE ORDER', pageWidth / 2, yPos, { align: 'center' });
-
-  yPos += 8;
-
-  // Another divider
-  doc.line(margin + 50, yPos, pageWidth - margin - 50, yPos);
-
-  yPos += 10;
-
-  // Order Details and Supplier Info - Two columns
   doc.setFontSize(9);
-  doc.setTextColor(...primaryColor);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 80, 80);
+  const contact = [settings?.company_address, settings?.contact_detail_1 ? `Contact # ${settings.contact_detail_1}` : null, settings?.contact_detail_2].filter(Boolean).join('. ');
+  doc.text(contact, centerX, y + 15, { align: 'center' });
+  const tax = [settings?.ntn ? `NTN # ${settings.ntn}` : null, settings?.str ? `STR # ${settings.str}` : null].filter(Boolean).join('   ');
+  if (tax) doc.text(tax, centerX, y + 21, { align: 'center' });
 
-  // Left column - Order Details
-  doc.setFont(undefined, 'bold');
-  doc.text('PO #:', margin, yPos);
-  doc.setFont(undefined, 'normal');
-  doc.text(purchase.po_no || '-', margin + 25, yPos);
+  if (images.qr) try { doc.addImage(images.qr, 'JPEG', pageWidth - margin - 24, y, 24, 24); } catch (e) { }
 
-  doc.setFont(undefined, 'bold');
-  doc.text('Date:', margin, yPos + 5);
-  doc.setFont(undefined, 'normal');
-  doc.text(formatDate(purchase.po_date), margin + 25, yPos + 5);
+  y += 30;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.4);
+  doc.line(centerX - 26, y, centerX + 26, y);
+  y += 5;
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text('PURCHASE ORDER REPORT', centerX, y, { align: 'center' });
+  y += 3;
+  doc.setDrawColor(0, 0, 0);
+  doc.line(centerX - 24, y, centerX + 24, y);
+  y += 8;
 
-  doc.setFont(undefined, 'bold');
-  doc.text('Status:', margin, yPos + 10);
-  doc.setFont(undefined, 'normal');
-  doc.text(purchase.status || 'Pending', margin + 25, yPos + 10);
+  // Order From (Supplier)
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 80, 80);
+  doc.text('ORDER FROM,', margin, y);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(9);
+  doc.text((purchase.suppliers?.supplier_name || 'SUPPLIER').toUpperCase(), margin, y + 5);
 
-  // Right column - Supplier Details
-  const rightCol = pageWidth - margin - 60;
-  doc.setFont(undefined, 'bold');
-  doc.text('Supplier:', rightCol, yPos);
-  doc.setFont(undefined, 'normal');
-  doc.text(purchase.suppliers?.supplier_name || '-', rightCol, yPos + 5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 80, 80);
+  doc.setFontSize(8);
+  let orderY = y + 10;
+  if (purchase.suppliers?.address) { doc.text(purchase.suppliers.address, margin, orderY); orderY += 4; }
+  const supplierTax = [purchase.suppliers?.ntn ? `NTN # ${purchase.suppliers.ntn}` : null, purchase.suppliers?.str ? `STR # ${purchase.suppliers.str}` : null].filter(Boolean).join('   ');
+  if (supplierTax) doc.text(supplierTax, margin, orderY);
 
-  if (purchase.suppliers?.mobile_no) {
-    doc.text(`Mobile: ${purchase.suppliers.mobile_no}`, rightCol, yPos + 10);
+  const rightX = pageWidth - margin;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 80, 80);
+  doc.text('Purchase Order #', rightX, y, { align: 'right' });
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  let invY = y + 5;
+  doc.text(purchase.po_no || '-', rightX, invY, { align: 'right' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 80, 80);
+  doc.setFontSize(8);
+  invY += 5;
+  doc.text(`PO Date: ${formatDate(purchase.po_date)}`, rightX, invY, { align: 'right' });
+  invY += 4;
+  if (purchase.receiving_date) {
+    doc.text(`Receiving Date: ${formatDate(purchase.receiving_date)}`, rightX, invY, { align: 'right' });
+    invY += 4;
   }
+  doc.text(`Status: ${(purchase.status || 'Pending').toUpperCase()}`, rightX, invY, { align: 'right' });
 
-  if (purchase.suppliers?.address) {
-    const addressLines = doc.splitTextToSize(purchase.suppliers.address, 55);
-    doc.text(addressLines, rightCol, yPos + 15);
-  }
+  y += 24;
 
-  yPos += 25;
-
-  // Items Table
-  const tableData = items.map((item, index) => [
-    index + 1,
-    item.product_name || '-',
-    item.quantity || 0,
-    formatCurrency(item.unit_price),
-    formatCurrency(item.total_price || (item.quantity * item.unit_price)),
+  // Table body data
+  const simpleTableBody = itemsData.map((item) => [
+    String(item.idx),
+    '',
+    String(item.qty),
+    item.unit,
+    item.price.toFixed(2),
+    '',
+    formatCurrency(item.amount)
   ]);
 
   autoTable(doc, {
-    startY: yPos,
-    head: [['#', 'Product', 'Qty', 'Unit Price', 'Amount']],
-    body: tableData,
-    theme: 'grid',
+    startY: y,
+    head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
+    body: simpleTableBody,
+    foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
+    theme: 'plain',
     headStyles: {
-      fillColor: primaryColor,
-      textColor: 255,
+      fillColor: [255, 255, 255],
+      textColor: [0, 0, 0],
       fontStyle: 'bold',
-      fontSize: 9,
-      halign: 'center'
+      fontSize: 10,
+      halign: 'center',
+      valign: 'middle',
+      lineWidth: 0,
+      cellPadding: { top: 3, right: 0.75, bottom: 6, left: 0.75 },
     },
     bodyStyles: {
-      fontSize: 8,
-      cellPadding: 3
+      fontSize: 10,
+      textColor: [0, 0, 0],
+      halign: 'center',
+      valign: 'top',
+      lineWidth: 0,
+      lineColor: [255, 255, 255],
+      minCellHeight: 12,
+      cellPadding: { top: 3, right: 0.75, bottom: 2, left: 0.75 },
+    },
+    footStyles: {
+      fillColor: [255, 255, 255],
+      textColor: [0, 0, 0],
+      fontStyle: 'bold',
+      fontSize: 10,
+      halign: 'center',
+      valign: 'middle',
+      lineWidth: 0,
+      cellPadding: { top: 6, right: 0.75, bottom: 1, left: 0.75 },
     },
     columnStyles: {
-      0: { cellWidth: 12, halign: 'center' },
-      1: { cellWidth: 'auto' },
-      2: { cellWidth: 20, halign: 'center' },
-      3: { cellWidth: 30, halign: 'right' },
-      4: { cellWidth: 35, halign: 'right' },
+      0: { halign: 'center', cellWidth: 18 },
+      1: { halign: 'center', cellWidth: 52 },
+      2: { halign: 'center', cellWidth: 22 },
+      3: { halign: 'center', cellWidth: 22 },
+      4: { halign: 'center', cellWidth: 28 },
+      5: { halign: 'center', cellWidth: 25 },
+      6: { halign: 'center', cellWidth: 28 },
     },
-    styles: {
-      lineColor: [200, 200, 200],
-      lineWidth: 0.1,
+    tableWidth: 195,
+    styles: { overflow: 'linebreak', cellPadding: 1.5 },
+    margin: { left: (pageWidth - 195) / 2, right: (pageWidth - 195) / 2 },
+    showHead: 'everyPage',
+    showFoot: 'lastPage',
+    willDrawPage: function (data) {
+      if (data.pageNumber > 1) {
+        const topY = 10;
+        const lineY = topY + 6;
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 80, 80);
+
+        doc.text(`${purchase.po_no || 'N/A'}`, margin, topY);
+        doc.text(`PO Date: ${formatDate(purchase.po_date)}`, pageWidth - margin, topY, { align: 'right' });
+
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.3);
+        doc.line(margin, lineY, pageWidth - margin, lineY);
+
+        data.settings.startY = lineY + 8;
+      }
     },
-    margin: { left: margin, right: margin },
+    didDrawPage: function(data) {
+      // Draw border around header row with column separators
+      const headerRow = data.table.head[0];
+      if (headerRow && headerRow.cells[0]) {
+        const startX = headerRow.cells[0].x;
+        const startY = headerRow.cells[0].y;
+        const tableWidth = 195;
+        const borderHeight = headerRow.height - 3;
+
+        if (startY >= 10) {
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.3);
+
+          doc.rect(startX, startY, tableWidth, borderHeight);
+
+          let currentX = startX;
+          const cells = headerRow.cells;
+          Object.keys(cells).forEach((key, i) => {
+            if (i < Object.keys(cells).length - 1) {
+              currentX += cells[key].width;
+              doc.line(currentX, startY, currentX, startY + borderHeight);
+            }
+          });
+        }
+      }
+
+      // Draw border around footer row WITHOUT vertical separators
+      const footerRow = data.table.foot[0];
+      if (footerRow && footerRow.cells[0]) {
+        const startX = footerRow.cells[0].x;
+        const startY = footerRow.cells[0].y;
+        const tableWidth = 195;
+        const footerHeight = footerRow.height;
+
+        if (startY >= 10) {
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.3);
+
+          doc.line(startX, startY, startX + tableWidth, startY);
+          doc.line(startX, startY + footerHeight, startX + tableWidth, startY + footerHeight);
+        }
+      }
+    },
+    didDrawCell: function(data) {
+      // Custom rendering for Item Name column (column 1) in body
+      if (data.section === 'body' && data.column.index === 1) {
+        const itemData = itemsData[data.row.index];
+        if (itemData) {
+          const cellCenterX = data.cell.x + data.cell.width / 2;
+          const topY = data.cell.y + 6;
+          const bottomY = data.cell.y + 11;
+
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(0, 0, 0);
+          doc.text(itemData.productName, cellCenterX, topY, { align: 'center' });
+
+          if (itemData.category) {
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(0, 0, 0);
+            doc.text(`(${itemData.category})`, cellCenterX, bottomY, { align: 'center' });
+          }
+        }
+      }
+
+      // Custom rendering for Tax column (column 5) in body
+      if (data.section === 'body' && data.column.index === 5) {
+        const itemData = itemsData[data.row.index];
+        if (itemData) {
+          const cellCenterX = data.cell.x + data.cell.width / 2;
+          const topY = data.cell.y + 6;
+          const bottomY = data.cell.y + 11;
+
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(0, 0, 0);
+          doc.text(formatCurrency(itemData.taxAmt), cellCenterX, topY, { align: 'center' });
+
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(0, 0, 0);
+          doc.text(`(${itemData.taxPercent}%)`, cellCenterX, bottomY, { align: 'center' });
+        }
+      }
+
+      if (data.section === 'foot' && data.row.index === 0) {
+        data.cell.y += 3;
+      }
+    },
   });
 
-  // Totals Section - Clean monochrome design
-  const finalY = doc.lastAutoTable.finalY + 10;
-  const totalsX = pageWidth - margin - 70;
+  let finalY = doc.lastAutoTable.finalY + 10;
+
+  if (finalY > pageHeight - 70) {
+    doc.addPage();
+    finalY = 20;
+  }
+
+  // Amount in words
+  const tableStartX = (pageWidth - 195) / 2;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text('ORDER AMOUNT IN WORDS', tableStartX, finalY);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const labelWidth = doc.getTextWidth('ORDER AMOUNT IN WORDS');
+  doc.text(numberToWords(Math.round(totalAmount)).toUpperCase(), tableStartX + labelWidth + 5, finalY);
+
+  finalY += 2;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.3);
+  const tableEndX = tableStartX + 195;
+  doc.line(tableStartX, finalY, tableEndX, finalY);
+
+  finalY += 10;
+
+  // Summary
+  const summaryLabels = ['ORDER AMOUNT', 'TAXABLE AMOUNT', 'RATE', 'TAX AMOUNT'];
+  const taxableAmount = totalAmount - totalTax;
+  const summaryValues = [formatCurrency(totalAmount), formatCurrency(taxableAmount), `${purchase.gst_percentage || 0}%`, formatCurrency(totalTax)];
+  const summaryColors = [[0,0,0], [0,123,255], [0,0,0], [220,53,69]];
+  const colW = (pageWidth - margin * 2) / 4;
 
   doc.setFontSize(9);
-  doc.setTextColor(...grayColor);
-  doc.text('Subtotal:', totalsX, finalY);
-  doc.setTextColor(...primaryColor);
-  doc.text(formatCurrency(purchase.subtotal), pageWidth - margin, finalY, { align: 'right' });
+  summaryLabels.forEach((label, i) => {
+    const x = margin + (i * colW) + (colW / 2);
+    doc.setTextColor(128, 128, 128);
+    doc.text(label, x, finalY, { align: 'center' });
+    const lw = doc.getTextWidth(label);
+    doc.setDrawColor(128, 128, 128);
+    doc.setLineWidth(0.2);
+    doc.line(x - lw/2, finalY + 1, x + lw/2, finalY + 1);
+  });
 
-  doc.setTextColor(...grayColor);
-  doc.text(`GST (${purchase.gst_percentage || 0}%):`, totalsX, finalY + 7);
-  doc.setTextColor(...primaryColor);
-  doc.text(formatCurrency(purchase.gst_amount), pageWidth - margin, finalY + 7, { align: 'right' });
+  finalY += 8;
+  doc.setFontSize(11);
+  summaryValues.forEach((val, i) => {
+    const x = margin + (i * colW) + (colW / 2);
+    doc.setTextColor(...summaryColors[i]);
+    doc.text(val, x, finalY, { align: 'center' });
+  });
 
-  // Total with bold styling
-  doc.setFont(undefined, 'bold');
+  // Signature
+  const sigY = pageHeight - 60;
   doc.setFontSize(10);
-  doc.setTextColor(...primaryColor);
-  doc.text('Total:', totalsX, finalY + 16);
-  doc.text(formatCurrency(purchase.total_amount), pageWidth - margin, finalY + 16, { align: 'right' });
-
-  // Notes
-  if (purchase.notes) {
-    const notesY = finalY + 35;
-    doc.setFontSize(9);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(...primaryColor);
-    doc.text('Notes:', margin, notesY);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(...grayColor);
-    const noteLines = doc.splitTextToSize(purchase.notes, pageWidth - (margin * 2));
-    doc.text(noteLines, margin, notesY + 5);
-  }
-
-  // Footer with company name
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(0, 0, 0);
+  doc.text(`For, ${settings?.company_name || 'COMPANY'}`, pageWidth - margin, sigY, { align: 'right' });
+  if (images.signature) try { doc.addImage(images.signature, 'PNG', pageWidth - margin - 45, sigY + 4, 42, 16); } catch (e) { }
+  doc.setDrawColor(128, 128, 128);
+  doc.setLineWidth(0.3);
+  doc.line(pageWidth - margin - 50, sigY + 24, pageWidth - margin, sigY + 24);
   doc.setFontSize(9);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(...primaryColor);
-  doc.text(`For, ${settings?.company_name || 'Company'}`, pageWidth - margin, pageHeight - 45, { align: 'right' });
+  doc.setTextColor(128, 128, 128);
+  doc.text('Authorized Authority', pageWidth - margin - 25, sigY + 30, { align: 'center' });
 
-  // Signature image or line
-  if (images.signature) {
-    try {
-      doc.addImage(images.signature, 'PNG', pageWidth - margin - 45, pageHeight - 42, 40, 15);
-    } catch (e) {
-      console.error('Error adding signature:', e);
-    }
+  // Page numbers
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.4);
+    doc.line(margin, pageHeight - 18, pageWidth - margin, pageHeight - 18);
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text(`page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
   }
-
-  // Signature line
-  doc.setDrawColor(...grayColor);
-  doc.line(pageWidth - margin - 50, pageHeight - 25, pageWidth - margin, pageHeight - 25);
-  doc.setFontSize(8);
-  doc.setTextColor(...grayColor);
-  doc.text('Authorized Signature', pageWidth - margin - 25, pageHeight - 20, { align: 'center' });
-
-  // Thank you message
-  doc.setFontSize(8);
-  doc.setFont(undefined, 'italic');
-  doc.setTextColor(...primaryColor);
-  doc.text('Thank you for your business!', pageWidth / 2, pageHeight - 12, { align: 'center' });
-
-  // Powered by footer
-  doc.setFontSize(7);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(...grayColor);
-  doc.text('Powered by airoxlab.com', pageWidth / 2, pageHeight - 6, { align: 'center' });
 
   return doc;
 }
@@ -358,13 +479,33 @@ export async function downloadPurchaseOrderPDF(purchase, items, settings, option
 export async function generatePurchasesReportPDF(purchases, totalAmount) {
   try {
     const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 14;
 
+    // Colors
+    const primaryColor = [23, 23, 23];
+    const grayColor = [115, 115, 115];
+
+    // Header
     doc.setFontSize(18);
-    doc.text('Purchase Orders Report', 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 14, 28);
-    doc.text(`Total Orders: ${purchases.length}`, 14, 34);
-    doc.text(`Total Amount: ${formatCurrency(totalAmount)}`, 14, 40);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(...primaryColor);
+    doc.text('Purchase Orders Report', margin, 20);
+
+    // Report metadata
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(...grayColor);
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, margin, 28);
+    doc.text(`Total Orders: ${purchases.length}`, margin, 33);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(...primaryColor);
+    doc.text(`Total Amount: ${formatCurrency(totalAmount)}`, margin, 38);
+
+    // Divider line
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(margin, 42, pageWidth - margin, 42);
 
     const tableData = purchases.map(po => [
       po.po_no || '-',
@@ -378,13 +519,41 @@ export async function generatePurchasesReportPDF(purchases, totalAmount) {
       startY: 46,
       head: [['PO #', 'Supplier', 'Date', 'Amount', 'Status']],
       body: tableData,
-      theme: 'striped',
-      headStyles: { fillColor: [23, 23, 23] },
-      styles: { fontSize: 8 },
+      theme: 'grid',
+      headStyles: {
+        fillColor: [23, 23, 23],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+        halign: 'center',
+        lineWidth: 0.4,
+        lineColor: [0, 0, 0],
+        cellPadding: { top: 1.5, right: 0.75, bottom: 4.5, left: 0.75 },
+      },
+      bodyStyles: {
+        fontSize: 8,
+        cellPadding: { top: 3, right: 0.75, bottom: 3, left: 0.75 },
+      },
+      styles: {
+        lineColor: [200, 200, 200],
+        lineWidth: 0.3,
+      },
       columnStyles: {
-        3: { halign: 'right' }
-      }
+        0: { cellWidth: 25, halign: 'left' },
+        1: { cellWidth: 'auto', halign: 'left' },
+        2: { cellWidth: 25, halign: 'center' },
+        3: { cellWidth: 30, halign: 'right' },
+        4: { cellWidth: 25, halign: 'center' },
+      },
+      margin: { left: margin, right: margin },
     });
+
+    // Footer
+    const finalY = doc.lastAutoTable.finalY + 10;
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'italic');
+    doc.setTextColor(...grayColor);
+    doc.text('Powered by airoxlab.com', pageWidth / 2, finalY, { align: 'center' });
 
     doc.save(`purchases-report-${new Date().toISOString().split('T')[0]}.pdf`);
   } catch (error) {
@@ -394,6 +563,33 @@ export async function generatePurchasesReportPDF(purchases, totalAmount) {
 }
 
 // Helper functions
+function numberToWords(num) {
+  if (num === 0) return 'ZERO ONLY';
+  const ones = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE',
+    'TEN', 'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN'];
+  const tens = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
+  const scales = ['', 'THOUSAND', 'MILLION', 'BILLION'];
+
+  function convertHundreds(n) {
+    let result = '';
+    if (n >= 100) { result += ones[Math.floor(n / 100)] + ' HUNDRED '; n %= 100; }
+    if (n >= 20) { result += tens[Math.floor(n / 10)] + ' '; n %= 10; }
+    if (n > 0) { result += ones[n] + ' '; }
+    return result;
+  }
+
+  let result = '';
+  let scaleIndex = 0;
+  let remaining = Math.floor(num);
+  while (remaining > 0) {
+    const chunk = remaining % 1000;
+    if (chunk > 0) result = convertHundreds(chunk) + scales[scaleIndex] + ' ' + result;
+    remaining = Math.floor(remaining / 1000);
+    scaleIndex++;
+  }
+  return result.trim() + ' ONLY';
+}
+
 function formatCurrency(amount) {
   return 'Rs ' + new Intl.NumberFormat('en-PK', {
     minimumFractionDigits: 0,

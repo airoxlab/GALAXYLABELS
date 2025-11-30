@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
 import SaleOrderViewModal from '@/components/sales/SaleOrderViewModal';
+import SaleOrderEditModal from '@/components/sales/SaleOrderEditModal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { notify, useConfirm } from '@/components/ui/Notifications';
 import { Eye, Download, Trash2, ChevronLeft, ChevronRight, Edit3, Search, X, FileSpreadsheet, FileText, Plus, Receipt, TrendingUp, Calendar, Users, Printer } from 'lucide-react';
@@ -29,6 +30,8 @@ export default function SalesPage() {
   const [settings, setSettings] = useState(null);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingOrderId, setEditingOrderId] = useState(null);
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
   const itemsPerPage = 10;
 
@@ -189,8 +192,14 @@ export default function SalesPage() {
   }
 
   function handleEditOrder(orderId) {
-    // Redirect to sale order page with the order ID to load it for editing
-    router.push(`/sales/sale-order?edit=${orderId}`);
+    setEditingOrderId(orderId);
+    setShowEditModal(true);
+  }
+
+  function handleEditSaved() {
+    if (user) fetchSales(user.id || user.userId);
+    setShowEditModal(false);
+    setEditingOrderId(null);
   }
 
   async function handleExportPDF() {
@@ -663,6 +672,19 @@ export default function SalesPage() {
           setSelectedInvoiceId(null);
         }}
         settings={settings}
+      />
+
+      {/* Edit Modal */}
+      <SaleOrderEditModal
+        isOpen={showEditModal}
+        onClose={() => {
+          setShowEditModal(false);
+          setEditingOrderId(null);
+        }}
+        orderId={editingOrderId}
+        userId={user?.id || user?.userId}
+        customers={customers}
+        onSave={handleEditSaved}
       />
 
       {/* Delete Confirmation Modal */}

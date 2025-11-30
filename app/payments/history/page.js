@@ -12,8 +12,11 @@ import { notify } from '@/components/ui/Notifications';
 import {
   Search, X, ChevronLeft, ChevronRight,
   DollarSign, TrendingUp, TrendingDown, FileText,
-  ArrowDownCircle, ArrowUpCircle
+  ArrowDownCircle, ArrowUpCircle, Eye, Edit3, Trash2
 } from 'lucide-react';
+import PaymentViewModal from '@/components/payments/PaymentViewModal';
+import PaymentEditDrawer from '@/components/payments/PaymentEditDrawer';
+import { useConfirm } from '@/components/ui/Notifications';
 
 export default function PaymentHistoryPage() {
   const router = useRouter();
@@ -31,6 +34,11 @@ export default function PaymentHistoryPage() {
   const [endDate, setEndDate] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
+
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditDrawer, setShowEditDrawer] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
 
   useEffect(() => {
     fetchUser();
@@ -76,10 +84,12 @@ export default function PaymentHistoryPage() {
     setLoading(true);
     try {
       // Fetch Payment In
+      // Query in ascending order (oldest first) since we'll reverse for display
       const { data: paymentsIn, error: errorIn } = await supabase
         .from('payments_in')
         .select(`
           id,
+          receipt_no,
           payment_date,
           payment_method,
           amount,
@@ -94,9 +104,12 @@ export default function PaymentHistoryPage() {
           denomination_5000,
           notes,
           customer_id,
+          created_at,
           customers(customer_name)
         `)
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .order('payment_date', { ascending: true })
+        .order('created_at', { ascending: true });
 
       if (errorIn) throw errorIn;
 
@@ -105,6 +118,7 @@ export default function PaymentHistoryPage() {
         .from('payments_out')
         .select(`
           id,
+          receipt_no,
           payment_date,
           payment_method,
           amount,
@@ -119,9 +133,12 @@ export default function PaymentHistoryPage() {
           denomination_5000,
           notes,
           supplier_id,
+          created_at,
           suppliers(supplier_name)
         `)
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .order('payment_date', { ascending: true })
+        .order('created_at', { ascending: true });
 
       if (errorOut) throw errorOut;
 
@@ -142,10 +159,16 @@ export default function PaymentHistoryPage() {
         balance_after: p.supplier_balance
       }));
 
-      // Merge and sort by date
-      const allPayments = [...formattedPaymentsIn, ...formattedPaymentsOut].sort(
-        (a, b) => new Date(b.payment_date) - new Date(a.payment_date)
-      );
+      // Merge and sort by date (oldest first), then by created_at for same dates
+      const allPayments = [...formattedPaymentsIn, ...formattedPaymentsOut].sort((a, b) => {
+        const dateCompare = new Date(a.payment_date) - new Date(b.payment_date);
+        if (dateCompare !== 0) return dateCompare;
+        // If dates are equal, sort by created_at timestamp (oldest first)
+        return new Date(a.created_at) - new Date(b.created_at);
+      });
+
+      // Reverse to show newest first in the UI
+      allPayments.reverse();
 
       setPayments(allPayments);
     } catch (error) {
@@ -160,6 +183,7 @@ export default function PaymentHistoryPage() {
   const filteredPayments = payments.filter(payment => {
     const matchesSearch =
       payment.party_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      payment.receipt_no?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       payment.online_reference?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       payment.notes?.toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -198,6 +222,46 @@ export default function PaymentHistoryPage() {
     setStartDate('');
     setEndDate('');
     setCurrentPage(1);
+  }
+
+  function handleViewDetails(payment) {
+    setSelectedPayment(payment);
+    setShowViewModal(true);
+  }
+
+  function handleEdit(payment) {
+    setSelectedPayment(payment);
+    setShowEditDrawer(true);
+  }
+
+  function handlePaymentSaved() {
+    if (user) fetchPayments(user.id);
+  }
+
+  async function handleDelete(payment) {
+    const tableName = payment.type === 'in' ? 'payments_in' : 'payments_out';
+    const paymentType = payment.type === 'in' ? 'Payment In' : 'Payment Out';
+
+    showDeleteConfirm(
+      `Delete ${paymentType}`,
+      `Are you sure you want to delete this ${paymentType.toLowerCase()}? This action cannot be undone.`,
+      async () => {
+        try {
+          const { error } = await supabase
+            .from(tableName)
+            .delete()
+            .eq('id', payment.id);
+
+          if (error) throw error;
+
+          notify.success(`${paymentType} deleted successfully!`);
+          if (user) fetchPayments(user.id);
+        } catch (error) {
+          console.error(`Error deleting ${paymentType.toLowerCase()}:`, error);
+          notify.error('Error: ' + error.message);
+        }
+      }
+    );
   }
 
   const formatDate = (dateString) => {
@@ -280,59 +344,69 @@ export default function PaymentHistoryPage() {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-          <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl border border-blue-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-neutral-500">Total Transactions</p>
-                <p className="text-lg font-bold text-neutral-900">{filteredPayments.length}</p>
+                <p className="text-xs text-blue-600 font-medium">Total Transactions</p>
+                <p className="text-xl font-bold text-blue-900">{filteredPayments.length}</p>
               </div>
-              <FileText className="w-5 h-5 text-neutral-400" />
+              <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-100 rounded-xl border border-emerald-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-neutral-500">Payments In</p>
-                <p className="text-lg font-bold text-green-600">{totalPaymentsIn.length}</p>
+                <p className="text-xs text-emerald-600 font-medium">Payments In</p>
+                <p className="text-xl font-bold text-emerald-900">{totalPaymentsIn.length}</p>
               </div>
-              <ArrowDownCircle className="w-5 h-5 text-green-500" />
+              <div className="w-10 h-10 rounded-lg bg-emerald-500 flex items-center justify-center">
+                <ArrowDownCircle className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+          <div className="bg-gradient-to-br from-rose-50 to-pink-100 rounded-xl border border-rose-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-neutral-500">Payments Out</p>
-                <p className="text-lg font-bold text-red-600">{totalPaymentsOut.length}</p>
+                <p className="text-xs text-rose-600 font-medium">Payments Out</p>
+                <p className="text-xl font-bold text-rose-900">{totalPaymentsOut.length}</p>
               </div>
-              <ArrowUpCircle className="w-5 h-5 text-red-500" />
+              <div className="w-10 h-10 rounded-lg bg-rose-500 flex items-center justify-center">
+                <ArrowUpCircle className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+          <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl border border-green-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-neutral-500">Amount In</p>
-                <p className="text-lg font-bold text-green-600">{formatCurrency(totalAmountIn)}</p>
+                <p className="text-xs text-green-600 font-medium">Amount In</p>
+                <p className="text-xl font-bold text-green-900">{formatCurrency(totalAmountIn)}</p>
               </div>
-              <TrendingUp className="w-5 h-5 text-green-500" />
+              <div className="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+          <div className="bg-gradient-to-br from-red-50 to-rose-100 rounded-xl border border-red-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-neutral-500">Amount Out</p>
-                <p className="text-lg font-bold text-red-600">{formatCurrency(totalAmountOut)}</p>
+                <p className="text-xs text-red-600 font-medium">Amount Out</p>
+                <p className="text-xl font-bold text-red-900">{formatCurrency(totalAmountOut)}</p>
               </div>
-              <TrendingDown className="w-5 h-5 text-red-500" />
+              <div className="w-10 h-10 rounded-lg bg-red-500 flex items-center justify-center">
+                <TrendingDown className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-neutral-200 p-3">
+        <div className="bg-white/80 backdrop-blur-xl rounded-xl border border-neutral-200/60 p-3 shadow-sm">
           <div className="flex items-center gap-2 flex-wrap">
             <div className="w-[180px]">
               <SearchableDropdown
@@ -424,7 +498,7 @@ export default function PaymentHistoryPage() {
         </div>
 
         {/* Payments Table */}
-        <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+        <div className="bg-white/80 backdrop-blur-xl rounded-xl border border-neutral-200/60 overflow-hidden shadow-sm">
           <div className="p-4 border-b border-neutral-200">
             <h2 className="text-sm font-semibold text-neutral-900">Payment Transactions</h2>
           </div>
@@ -452,6 +526,7 @@ export default function PaymentHistoryPage() {
                       <th className="text-right py-3 px-4 text-sm font-semibold text-neutral-700">Amount</th>
                       <th className="text-right py-3 px-4 text-sm font-semibold text-neutral-700">Balance After</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Notes</th>
+                      <th className="text-center py-3 px-4 text-sm font-semibold text-neutral-700">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
@@ -502,7 +577,7 @@ export default function PaymentHistoryPage() {
                         </td>
                         <td className="py-3 px-4">
                           <span className="text-sm text-neutral-600">
-                            {payment.online_reference || '-'}
+                            {payment.receipt_no || '-'}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
@@ -522,6 +597,40 @@ export default function PaymentHistoryPage() {
                           <span className="text-sm text-neutral-600 truncate max-w-[200px] inline-block">
                             {payment.notes || '-'}
                           </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => handleViewDetails(payment)}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-blue-600 hover:bg-blue-50"
+                              )}
+                              title="View details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleEdit(payment)}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-amber-600 hover:bg-amber-50"
+                              )}
+                              title="Edit payment"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(payment)}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-red-600 hover:bg-red-50"
+                              )}
+                              title="Delete payment"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -570,6 +679,67 @@ export default function PaymentHistoryPage() {
           )}
         </div>
       </div>
+
+      {/* View Modal */}
+      <PaymentViewModal
+        payment={selectedPayment}
+        isOpen={showViewModal}
+        onClose={() => {
+          setShowViewModal(false);
+          setSelectedPayment(null);
+        }}
+      />
+
+      {/* Edit Drawer */}
+      <PaymentEditDrawer
+        payment={selectedPayment}
+        isOpen={showEditDrawer}
+        onClose={() => {
+          setShowEditDrawer(false);
+          setSelectedPayment(null);
+        }}
+        onSaved={handlePaymentSaved}
+      />
+
+      {/* Delete Confirm Modal */}
+      {confirmState.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={hideConfirm} />
+          <div className="relative bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-neutral-900 mb-2">
+              {confirmState.title}
+            </h3>
+            <p className="text-sm text-neutral-600 mb-6">
+              {confirmState.message}
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={hideConfirm}
+                className={cn(
+                  "px-4 py-2 rounded-lg text-sm font-medium",
+                  "text-neutral-700 bg-white border border-neutral-300",
+                  "hover:bg-neutral-100 transition-colors"
+                )}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  confirmState.onConfirm();
+                  hideConfirm();
+                }}
+                className={cn(
+                  "px-4 py-2 rounded-lg text-sm font-medium",
+                  "bg-red-600 text-white",
+                  "hover:bg-red-700 transition-colors"
+                )}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

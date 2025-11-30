@@ -100,6 +100,7 @@ export default function CustomerLedgerPage() {
     setLedgerLoading(true);
     try {
       // Try to fetch from customer_ledger table first
+      // Query in ascending order (oldest first) since we'll reverse for display
       let ledgerQuery = supabase
         .from('customer_ledger')
         .select(`
@@ -112,10 +113,12 @@ export default function CustomerLedgerPage() {
           credit,
           balance,
           customer_id,
+          created_at,
           customers(customer_name)
         `)
         .eq('user_id', userId)
-        .order('transaction_date', { ascending: true });
+        .order('transaction_date', { ascending: true })
+        .order('created_at', { ascending: true });
 
       // Filter by specific customer if selected
       if (customerId !== 'all') {
@@ -132,18 +135,34 @@ export default function CustomerLedgerPage() {
 
       if (ledgerError) throw ledgerError;
 
-      const ledgerEntries = ledgerRes?.map(entry => ({
-        id: `ledger-${entry.id}`,
-        date: entry.transaction_date,
-        type: entry.transaction_type,
-        reference: entry.reference_no || '-',
-        customerName: entry.customers?.customer_name || 'Unknown Customer',
-        customerId: entry.customer_id,
-        description: entry.description || '-',
-        debit: parseFloat(entry.debit) || 0,
-        credit: parseFloat(entry.credit) || 0,
-        balance: parseFloat(entry.balance) || 0
-      })) || [];
+      const ledgerEntries = ledgerRes?.map(entry => {
+        // Format transaction type for display
+        let displayType = entry.transaction_type;
+        if (entry.transaction_type === 'sale_order') {
+          displayType = 'Sale Order';
+        } else if (entry.transaction_type === 'sales_invoice') {
+          displayType = 'Invoice';
+        } else if (entry.transaction_type === 'payment') {
+          displayType = 'Payment';
+        }
+
+        return {
+          id: `ledger-${entry.id}`,
+          date: entry.transaction_date,
+          created_at: entry.created_at,
+          type: displayType,
+          reference: entry.reference_no || '-',
+          customerName: entry.customers?.customer_name || 'Unknown Customer',
+          customerId: entry.customer_id,
+          description: entry.description || '-',
+          debit: parseFloat(entry.debit) || 0,
+          credit: parseFloat(entry.credit) || 0,
+          balance: parseFloat(entry.balance) || 0
+        };
+      }) || [];
+
+      // Reverse to show newest first in the UI
+      ledgerEntries.reverse();
 
       // Calculate stats from ledger entries
       const totalDebit = ledgerEntries.reduce((sum, e) => sum + e.debit, 0);
@@ -176,10 +195,12 @@ export default function CustomerLedgerPage() {
         invoice_date,
         total_amount,
         customer_id,
+        created_at,
         customers(customer_name)
       `)
       .eq('user_id', userId)
-      .order('invoice_date', { ascending: true });
+      .order('invoice_date', { ascending: true })
+      .order('created_at', { ascending: true });
 
     let paymentsQuery = supabase
       .from('payments_in')
@@ -190,10 +211,12 @@ export default function CustomerLedgerPage() {
         amount,
         payment_method,
         customer_id,
+        created_at,
         customers(customer_name)
       `)
       .eq('user_id', userId)
-      .order('payment_date', { ascending: true });
+      .order('payment_date', { ascending: true })
+      .order('created_at', { ascending: true });
 
     if (customerId !== 'all') {
       invoicesQuery = invoicesQuery.eq('customer_id', customerId);
@@ -215,6 +238,7 @@ export default function CustomerLedgerPage() {
       ledgerEntries.push({
         id: `inv-${inv.id}`,
         date: inv.invoice_date,
+        created_at: inv.created_at,
         type: 'Invoice',
         reference: inv.invoice_no,
         customerName,
@@ -232,6 +256,7 @@ export default function CustomerLedgerPage() {
       ledgerEntries.push({
         id: `pay-${pay.id}`,
         date: pay.payment_date,
+        created_at: pay.created_at,
         type: 'Payment',
         reference: pay.receipt_no || '-',
         customerName,
@@ -242,16 +267,28 @@ export default function CustomerLedgerPage() {
       });
     });
 
-    ledgerEntries.sort((a, b) => new Date(a.date) - new Date(b.date));
+    // Sort oldest first for correct balance calculation
+    ledgerEntries.sort((a, b) => {
+      const dateCompare = new Date(a.date) - new Date(b.date);
+      if (dateCompare !== 0) return dateCompare;
+      // If dates are equal, sort by created_at timestamp (oldest first)
+      return new Date(a.created_at) - new Date(b.created_at);
+    });
+
+    // Calculate running balances from oldest to newest
     ledgerEntries.forEach(entry => {
       const cid = entry.customerId;
       if (customerBalances[cid]) {
         customerBalances[cid].balance += entry.debit - entry.credit;
         entry.balance = customerBalances[cid].balance;
       } else {
+        customerBalances[cid] = { balance: entry.debit - entry.credit, name: entry.customerName };
         entry.balance = entry.debit - entry.credit;
       }
     });
+
+    // Reverse to show newest first in the UI
+    ledgerEntries.reverse();
 
     const totalInvoices = invoicesRes.data?.length || 0;
     const totalSales = invoicesRes.data?.reduce((sum, inv) => sum + (parseFloat(inv.total_amount) || 0), 0) || 0;
@@ -449,57 +486,81 @@ export default function CustomerLedgerPage() {
         {/* Ledger Stats */}
         {customerStats && (
           <div className="grid grid-cols-4 gap-3">
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl border border-blue-100 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Total Invoices</p>
-                  <p className="text-lg font-bold text-neutral-900">{customerStats.totalInvoices}</p>
+                  <p className="text-xs text-blue-600 font-medium">Total Invoices</p>
+                  <p className="text-xl font-bold text-blue-900">{customerStats.totalInvoices}</p>
                 </div>
-                <FileText className="w-5 h-5 text-neutral-400" />
+                <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className="bg-gradient-to-br from-emerald-50 to-teal-100 rounded-xl border border-emerald-100 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Total Sales</p>
-                  <p className="text-lg font-bold text-neutral-900">{formatCurrency(customerStats.totalSales)}</p>
+                  <p className="text-xs text-emerald-600 font-medium">Total Sales</p>
+                  <p className="text-xl font-bold text-emerald-900">{formatCurrency(customerStats.totalSales)}</p>
                 </div>
-                <TrendingUp className="w-5 h-5 text-neutral-400" />
+                <div className="w-10 h-10 rounded-lg bg-emerald-500 flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl border border-green-100 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Total Paid</p>
-                  <p className="text-lg font-bold text-green-600">{formatCurrency(customerStats.totalPayments)}</p>
+                  <p className="text-xs text-green-600 font-medium">Total Paid</p>
+                  <p className="text-xl font-bold text-green-900">{formatCurrency(customerStats.totalPayments)}</p>
                 </div>
-                <CheckCircle className="w-5 h-5 text-green-500" />
+                <div className="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className={cn(
+              "rounded-xl border px-4 py-3",
+              customerStats.outstandingBalance > 0
+                ? "bg-gradient-to-br from-red-50 to-rose-100 border-red-100"
+                : "bg-gradient-to-br from-violet-50 to-purple-100 border-violet-100"
+            )}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Outstanding</p>
                   <p className={cn(
-                    "text-lg font-bold",
-                    customerStats.outstandingBalance > 0 ? "text-red-600" : "text-neutral-900"
+                    "text-xs font-medium",
+                    customerStats.outstandingBalance > 0 ? "text-red-600" : "text-violet-600"
+                  )}>Outstanding</p>
+                  <p className={cn(
+                    "text-xl font-bold",
+                    customerStats.outstandingBalance > 0 ? "text-red-900" : "text-violet-900"
                   )}>
                     {formatCurrency(customerStats.outstandingBalance)}
                   </p>
                 </div>
-                <Clock className="w-5 h-5 text-red-500" />
+                <div className={cn(
+                  "w-10 h-10 rounded-lg flex items-center justify-center",
+                  customerStats.outstandingBalance > 0 ? "bg-red-500" : "bg-violet-500"
+                )}>
+                  <Clock className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
           </div>
         )}
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-neutral-200 p-3">
+        <div className={cn(
+          "bg-white/80 backdrop-blur-xl rounded-xl p-3",
+          "border border-neutral-200/60",
+          "shadow-[0_2px_10px_rgba(0,0,0,0.03)]",
+          "relative z-50"
+        )}>
           <div className="flex items-center gap-2">
-            <div className="w-[250px]">
+            <div className="w-[250px] relative z-50">
               <SearchableDropdown
                 options={customerOptions}
                 value={selectedCustomer}
@@ -590,7 +651,12 @@ export default function CustomerLedgerPage() {
         </div>
 
         {/* Ledger Table */}
-        <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+        <div className={cn(
+          "bg-white/80 backdrop-blur-xl rounded-xl",
+          "border border-neutral-200/60",
+          "shadow-[0_2px_10px_rgba(0,0,0,0.03)]",
+          "overflow-hidden"
+        )}>
           <div className="p-4 border-b border-neutral-200">
             <h2 className="text-sm font-semibold text-neutral-900">
               Ledger Report {selectedCustomer !== 'all' && customerStats ? `- ${customers.find(c => c.id.toString() === selectedCustomer)?.customer_name}` : '(All Customers)'}
@@ -633,7 +699,7 @@ export default function CustomerLedgerPage() {
                       <td className="py-3 px-4">
                         <span className={cn(
                           "px-2 py-0.5 rounded text-xs font-medium",
-                          entry.type === 'Invoice'
+                          (entry.type === 'Invoice' || entry.type === 'Sale Order')
                             ? "bg-blue-100 text-blue-700"
                             : "bg-green-100 text-green-700"
                         )}>

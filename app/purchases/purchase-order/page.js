@@ -248,10 +248,25 @@ export default function NewPurchaseOrderPage() {
     setFormData(prev => ({ ...prev, items: newItems }));
   };
 
-  const handleItemChange = (index, field, value) => {
+  const handleItemChange = async (index, field, value) => {
     const newItems = [...formData.items];
     newItems[index][field] = value;
     setFormData(prev => ({ ...prev, items: newItems }));
+
+    // Update product price in database when unit_price is changed
+    if (field === 'unit_price' && newItems[index].product_id) {
+      try {
+        const newPrice = parseFloat(value);
+        if (!isNaN(newPrice) && newPrice >= 0) {
+          await supabase
+            .from('products')
+            .update({ unit_price: newPrice })
+            .eq('id', parseInt(newItems[index].product_id));
+        }
+      } catch (error) {
+        console.error('Error updating product price:', error);
+      }
+    }
   };
 
   const addItem = () => {

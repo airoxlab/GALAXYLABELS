@@ -87,7 +87,7 @@ export default function SearchableDropdown({
   };
 
   return (
-    <div className={cn('relative z-auto', className)} ref={containerRef}>
+    <div className={cn('relative', className)} ref={containerRef}>
       {label && (
         <label className="block text-[10px] font-medium text-neutral-700 mb-0.5">
           {label}

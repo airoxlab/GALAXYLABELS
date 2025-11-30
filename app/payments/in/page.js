@@ -78,18 +78,25 @@ export default function PaymentInPage() {
   }
 
   async function generateReceiptNo(uid) {
-    const { data, error } = await supabase
-      .from('payments_in')
-      .select('receipt_no')
-      .eq('user_id', uid)
-      .order('id', { ascending: false })
-      .limit(1);
+    try {
+      // Fetch settings to get prefix and next number
+      const { data: settingsData, error: settingsError } = await supabase
+        .from('settings')
+        .select('payment_in_prefix, payment_in_next_number')
+        .eq('user_id', uid)
+        .single();
 
-    if (data && data.length > 0) {
-      const lastNo = parseInt(data[0].receipt_no.split('-')[1]) || 0;
-      setFormData(prev => ({ ...prev, receipt_no: `RCP-${String(lastNo + 1).padStart(4, '0')}` }));
-    } else {
-      setFormData(prev => ({ ...prev, receipt_no: 'RCP-0001' }));
+      if (settingsError) throw settingsError;
+
+      const prefix = settingsData?.payment_in_prefix || 'PI';
+      const nextNumber = settingsData?.payment_in_next_number || 1;
+      const receiptNo = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
+
+      setFormData(prev => ({ ...prev, receipt_no: receiptNo }));
+    } catch (error) {
+      console.error('Error generating receipt number:', error);
+      // Fallback to default
+      setFormData(prev => ({ ...prev, receipt_no: 'PI-0001' }));
     }
   }
 
@@ -142,6 +149,7 @@ export default function PaymentInPage() {
       // Insert payment
       const paymentData = {
         user_id: userId,
+        receipt_no: formData.receipt_no,
         payment_date: formData.date,
         customer_id: parseInt(formData.customer_id),
         payment_method: formData.payment_method,
@@ -188,11 +196,20 @@ export default function PaymentInPage() {
         transaction_date: formData.date,
         reference_id: payment.id,
         reference_no: formData.receipt_no,
-        debit: amount,
-        credit: 0,
+        debit: 0,
+        credit: amount,
         balance: newBalance,
         description: `Payment received - ${formData.payment_method}`,
       }]);
+
+      // Increment payment_in_next_number in settings
+      if (settings) {
+        const nextNumber = (settings.payment_in_next_number || 1) + 1;
+        await supabase
+          .from('settings')
+          .update({ payment_in_next_number: nextNumber })
+          .eq('user_id', userId);
+      }
 
       // Store the saved payment for download
       setLastSavedPayment({

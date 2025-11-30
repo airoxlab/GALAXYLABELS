@@ -24,8 +24,14 @@ import {
   ChevronsRight,
   DollarSign,
   Calendar,
-  TrendingDown
+  TrendingDown,
+  Download,
+  FileText
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 export default function ExpensesPage() {
   const router = useRouter();
@@ -40,6 +46,7 @@ export default function ExpensesPage() {
   const [editingExpense, setEditingExpense] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [userId, setUserId] = useState(null);
+  const [settings, setSettings] = useState(null);
 
   // Confirm Modal State
   const [confirmModal, setConfirmModal] = useState({
@@ -72,6 +79,7 @@ export default function ExpensesPage() {
         setUserId(data.user.id);
         fetchExpenses(data.user.id);
         fetchCategories(data.user.id);
+        fetchSettings(data.user.id);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -110,6 +118,21 @@ export default function ExpensesPage() {
       setCategories(data || []);
     } catch (error) {
       console.error('Error fetching categories:', error);
+    }
+  }
+
+  async function fetchSettings(uid) {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('user_id', uid)
+        .single();
+
+      if (error) throw error;
+      setSettings(data || null);
+    } catch (error) {
+      console.error('Error fetching settings:', error);
     }
   }
 
@@ -342,6 +365,399 @@ export default function ExpensesPage() {
 
   const totalAmount = filteredExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
 
+  // Export to Excel
+  const exportToExcel = () => {
+    try {
+      if (filteredExpenses.length === 0) {
+        toast.error('No expenses to export', {
+          duration: 2000,
+          style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+        });
+        return;
+      }
+
+      const workbook = XLSX.utils.book_new();
+
+      // Create header rows with company info
+      const headerRows = [
+        [settings?.company_name || 'Company Name'],
+        [settings?.company_address || ''],
+        [`Phone: ${settings?.contact_detail_1 || ''}`],
+        [`Email: ${settings?.email_1 || ''}`],
+        [`NTN: ${settings?.ntn || ''}`],
+        [],
+        ['Expense Report'],
+        [`Generated: ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`],
+        [],
+        [`Total Expenses: ${filteredExpenses.length}`, `Total Amount: ${formatCurrency(totalAmount)}`],
+        []
+      ];
+
+      // Create data rows
+      const dataRows = filteredExpenses.map(expense => [
+        formatDate(expense.expense_date),
+        expense.expense_categories?.name || 'Uncategorized',
+        expense.description || '-',
+        expense.amount || 0,
+        expense.notes || '-'
+      ]);
+
+      // Add column headers
+      const columnHeaders = ['Date', 'Category', 'Description', 'Amount', 'Notes'];
+
+      // Combine all rows
+      const allRows = [...headerRows, columnHeaders, ...dataRows];
+
+      const worksheet = XLSX.utils.aoa_to_sheet(allRows);
+
+      // Auto-size columns
+      const colWidths = [
+        { wch: 12 }, // Date
+        { wch: 20 }, // Category
+        { wch: 40 }, // Description
+        { wch: 15 }, // Amount
+        { wch: 30 }, // Notes
+      ];
+      worksheet['!cols'] = colWidths;
+
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Expenses');
+
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Expenses_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+      toast.success('Excel exported successfully', {
+        duration: 2000,
+        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+      });
+    } catch (error) {
+      console.error('Error exporting Excel:', error);
+      toast.error(`Error exporting Excel: ${error.message}`, {
+        duration: 3000,
+        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+      });
+    }
+  };
+
+  // Export to PDF
+  const exportToPDF = async () => {
+    try {
+      if (filteredExpenses.length === 0) {
+        toast.error('No expenses to export', {
+          duration: 2000,
+          style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+        });
+        return;
+      }
+
+      // Helper to load image as base64 with compression
+      const getImageAsBase64 = async (url, maxWidth = 150, quality = 0.8) => {
+        if (!url) return null;
+        try {
+          const response = await fetch(url);
+          const blob = await response.blob();
+          return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              let width = img.width;
+              let height = img.height;
+              if (width > maxWidth) {
+                height = (height * maxWidth) / width;
+                width = maxWidth;
+              }
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.onerror = reject;
+            img.src = URL.createObjectURL(blob);
+          });
+        } catch (error) {
+          console.error('Error loading image:', error);
+          return null;
+        }
+      };
+
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 14;
+
+      // Load images with compression
+      const images = {};
+      if (settings?.logo_url) {
+        images.logo = await getImageAsBase64(settings.logo_url, 200, 0.9);
+      }
+      if (settings?.qr_code_url) {
+        images.qr = await getImageAsBase64(settings.qr_code_url, 150, 0.9);
+      }
+
+      // Prepare data with category
+      const expensesData = filteredExpenses.map((expense, idx) => ({
+        idx: idx + 1,
+        date: formatDate(expense.expense_date),
+        category: expense.expense_categories?.name || 'Uncategorized',
+        description: expense.description || '-',
+        amount: parseFloat(expense.amount) || 0
+      }));
+
+      // Header
+      let y = 14;
+      const centerX = pageWidth / 2;
+
+      // Logo (left aligned)
+      if (images.logo) {
+        try {
+          doc.addImage(images.logo, 'JPEG', margin, y, 30, 30);
+        } catch (error) {
+          console.error('Error adding logo:', error);
+        }
+      }
+
+      // Company details (centered)
+      const companyY = y + 8;
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text(settings?.company_name || 'COMPANY NAME', centerX, companyY, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(80, 80, 80);
+
+      let contactY = companyY + 7;
+      if (settings?.company_address) {
+        doc.text(settings.company_address, centerX, contactY, { align: 'center' });
+        contactY += 5;
+      }
+
+      const contact = [
+        settings?.contact_detail_1 ? `Contact # ${settings.contact_detail_1}` : null,
+        settings?.email_1 ? `Email: ${settings.email_1}` : null
+      ].filter(Boolean).join(' | ');
+      if (contact) {
+        doc.text(contact, centerX, contactY, { align: 'center' });
+        contactY += 5;
+      }
+
+      const tax = [
+        settings?.ntn ? `NTN # ${settings.ntn}` : null,
+        settings?.str ? `STR # ${settings.str}` : null
+      ].filter(Boolean).join('   ');
+      if (tax) {
+        doc.text(tax, centerX, contactY, { align: 'center' });
+      }
+
+      // QR Code (right aligned)
+      if (images.qr) {
+        try {
+          doc.addImage(images.qr, 'JPEG', pageWidth - margin - 30, y, 30, 30);
+        } catch (error) {
+          console.error('Error adding QR code:', error);
+        }
+      }
+
+      y += 45;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.4);
+      doc.line(centerX - 40, y, centerX + 40, y);
+      y += 6;
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text('EXPENSE REPORT', centerX, y, { align: 'center' });
+      y += 4;
+      doc.setDrawColor(0, 0, 0);
+      doc.line(centerX - 42, y, centerX + 42, y);
+      y += 10;
+
+      // Date info
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(80, 80, 80);
+      doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, centerX, y, { align: 'center' });
+      y += 10;
+
+      // Summary section
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0, 0, 0);
+
+      const leftX = margin;
+      const rightX = pageWidth - margin;
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Total Expenses:', leftX, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${filteredExpenses.length}`, leftX + 35, y);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Total Amount:', rightX - 60, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(220, 38, 38);
+      doc.text(formatCurrency(totalAmount), rightX, y, { align: 'right' });
+
+      y += 10;
+
+      // Table data
+      const tableData = expensesData.map((expense) => [
+        String(expense.idx),
+        expense.date,
+        expense.category,
+        expense.description,
+        formatCurrency(expense.amount)
+      ]);
+
+      autoTable(doc, {
+        startY: y,
+        head: [['S.N', 'Date', 'Category', 'Description', 'Amount']],
+        body: tableData,
+        foot: [['', '', '', 'TOTAL', formatCurrency(totalAmount)]],
+        theme: 'plain',
+        headStyles: {
+          fillColor: [255, 255, 255],
+          textColor: [0, 0, 0],
+          fontStyle: 'bold',
+          fontSize: 11,
+          halign: 'center',
+          valign: 'middle',
+          lineWidth: 0,
+          cellPadding: { top: 4, right: 1, bottom: 7, left: 1 },
+        },
+        bodyStyles: {
+          fontSize: 10,
+          textColor: [0, 0, 0],
+          halign: 'center',
+          valign: 'middle',
+          lineWidth: 0,
+          lineColor: [255, 255, 255],
+          minCellHeight: 10,
+          cellPadding: { top: 3, right: 1, bottom: 3, left: 1 },
+        },
+        footStyles: {
+          fillColor: [255, 255, 255],
+          textColor: [0, 0, 0],
+          fontStyle: 'bold',
+          fontSize: 11,
+          halign: 'center',
+          valign: 'middle',
+          lineWidth: 0,
+          cellPadding: { top: 7, right: 1, bottom: 2, left: 1 },
+        },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 18 },
+          1: { halign: 'center', cellWidth: 28 },
+          2: { halign: 'center', cellWidth: 35 },
+          3: { halign: 'left', cellWidth: 80 },
+          4: { halign: 'right', cellWidth: 34 },
+        },
+        tableWidth: 195,
+        styles: { overflow: 'linebreak', cellPadding: 2 },
+        margin: { left: (pageWidth - 195) / 2, right: (pageWidth - 195) / 2, bottom: 30 },
+        showHead: 'everyPage',
+        showFoot: 'lastPage',
+        willDrawPage: function (data) {
+          if (data.pageNumber > 1) {
+            const topY = 10;
+            const lineY = topY + 6;
+
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(80, 80, 80);
+
+            doc.text('Expense Report', margin, topY);
+            doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, pageWidth - margin, topY, { align: 'right' });
+
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.3);
+            doc.line(margin, lineY, pageWidth - margin, lineY);
+
+            data.settings.startY = lineY + 8;
+          }
+        },
+        didDrawPage: function(data) {
+          // Draw border around header row with column separators
+          const headerRow = data.table.head[0];
+          if (headerRow && headerRow.cells[0]) {
+            const startX = headerRow.cells[0].x;
+            const startY = headerRow.cells[0].y;
+            const tableWidth = 195;
+            const borderHeight = headerRow.height - 3;
+
+            if (startY >= 10) {
+              doc.setDrawColor(0, 0, 0);
+              doc.setLineWidth(0.3);
+
+              doc.rect(startX, startY, tableWidth, borderHeight);
+
+              let currentX = startX;
+              const cells = headerRow.cells;
+              Object.keys(cells).forEach((key, i) => {
+                if (i < Object.keys(cells).length - 1) {
+                  currentX += cells[key].width;
+                  doc.line(currentX, startY, currentX, startY + borderHeight);
+                }
+              });
+            }
+          }
+
+          // Draw border around footer row (only top and bottom lines)
+          const footerRow = data.table.foot[0];
+          if (footerRow && footerRow.cells[0]) {
+            const startX = footerRow.cells[0].x;
+            const startY = footerRow.cells[0].y;
+            const tableWidth = 195;
+            const footerHeight = footerRow.height;
+
+            if (startY >= 10) {
+              doc.setDrawColor(0, 0, 0);
+              doc.setLineWidth(0.3);
+
+              doc.line(startX, startY, startX + tableWidth, startY);
+              doc.line(startX, startY + footerHeight, startX + tableWidth, startY + footerHeight);
+            }
+          }
+        },
+        didDrawCell: function(data) {
+          if (data.section === 'foot' && data.row.index === 0) {
+            data.cell.y += 3;
+          }
+        },
+      });
+
+      // Page numbers and footer
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.4);
+        doc.line(margin, pageHeight - 18, pageWidth - margin, pageHeight - 18);
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 100, 100);
+        doc.text(`page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+      }
+
+      doc.save(`Expenses_${new Date().toISOString().split('T')[0]}.pdf`);
+
+      toast.success('PDF exported successfully', {
+        duration: 2000,
+        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+      });
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast.error(`Error generating PDF: ${error.message}`, {
+        duration: 4000,
+        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+      });
+    }
+  };
+
   // Generate page numbers for pagination
   const getPageNumbers = () => {
     const pages = [];
@@ -397,7 +813,35 @@ export default function ExpensesPage() {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={exportToExcel}
+              className={cn(
+                "px-4 py-2 rounded-xl font-medium text-sm",
+                "bg-gradient-to-br from-emerald-500 to-teal-600 text-white",
+                "shadow-lg shadow-emerald-500/20",
+                "hover:from-emerald-600 hover:to-teal-700",
+                "transition-all duration-200",
+                "flex items-center gap-2"
+              )}
+            >
+              <Download className="w-4 h-4" />
+              Excel
+            </button>
+            <button
+              onClick={exportToPDF}
+              className={cn(
+                "px-4 py-2 rounded-xl font-medium text-sm",
+                "bg-gradient-to-br from-blue-500 to-indigo-600 text-white",
+                "shadow-lg shadow-blue-500/20",
+                "hover:from-blue-600 hover:to-indigo-700",
+                "transition-all duration-200",
+                "flex items-center gap-2"
+              )}
+            >
+              <FileText className="w-4 h-4" />
+              PDF
+            </button>
             <button
               onClick={() => setIsCategoryDrawerOpen(true)}
               className={cn(

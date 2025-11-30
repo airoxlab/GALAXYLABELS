@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
+import AddProductModal from '@/components/ui/AddProductModal';
 import toast from 'react-hot-toast';
 import { X, Save, Plus, Trash2, Package } from 'lucide-react';
 
@@ -14,6 +15,9 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [addProductIndex, setAddProductIndex] = useState(null);
+  const [addProductInitialName, setAddProductInitialName] = useState('');
 
   const [formData, setFormData] = useState({
     po_no: '',
@@ -119,9 +123,10 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
     }));
   };
 
-  const handleProductChange = (index, productId) => {
+  const handleProductChange = (index, productId, productsArray = null) => {
     const newItems = [...items];
-    const product = products.find(p => p.id === parseInt(productId));
+    const productsToUse = productsArray || products;
+    const product = productsToUse.find(p => p.id === parseInt(productId));
     if (product) {
       newItems[index] = {
         ...newItems[index],
@@ -140,10 +145,35 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
     setItems(newItems);
   };
 
-  const handleItemChange = (index, field, value) => {
+  const handleItemChange = async (index, field, value) => {
     const newItems = [...items];
     newItems[index][field] = value;
     setItems(newItems);
+
+    // If unit_price is changed, update the product's unit_price in the database
+    if (field === 'unit_price' && newItems[index].product_id) {
+      const productId = parseInt(newItems[index].product_id);
+      const newPrice = parseFloat(value) || 0;
+
+      try {
+        const { error } = await supabase
+          .from('products')
+          .update({ unit_price: newPrice })
+          .eq('id', productId)
+          .eq('user_id', userId);
+
+        if (error) {
+          console.error('Error updating product price:', error);
+        } else {
+          // Update local products state
+          setProducts(prev => prev.map(p =>
+            p.id === productId ? { ...p, unit_price: newPrice } : p
+          ));
+        }
+      } catch (error) {
+        console.error('Error updating product price:', error);
+      }
+    }
   };
 
   const addItem = () => {
@@ -155,6 +185,50 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
       setItems(items.filter((_, i) => i !== index));
     }
   };
+
+  const handleAddProductClick = (index, initialName = '') => {
+    setAddProductIndex(index);
+    setAddProductInitialName(initialName);
+    setShowAddProductModal(true);
+  };
+
+  const handleProductAdded = async (newProduct) => {
+    const updatedProducts = await fetchProducts();
+
+    // Pass the fresh products array directly to handleProductChange
+    if (addProductIndex !== null) {
+      handleProductChange(addProductIndex, newProduct.id.toString(), updatedProducts);
+    }
+    setAddProductIndex(null);
+    setAddProductInitialName('');
+  };
+
+  async function fetchProducts() {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select(`
+          id,
+          name,
+          unit_price,
+          category_id,
+          categories (
+            id,
+            name
+          )
+        `)
+        .eq('user_id', userId)
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+      setProducts(data || []);
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      return [];
+    }
+  }
 
   const calculateTotals = () => {
     const subtotal = items.reduce((sum, item) => {
@@ -376,7 +450,7 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
                     onChange={() => setFormData(prev => ({ ...prev, is_gst: true }))}
                     className="w-4 h-4"
                   />
-                  <span className="text-sm text-neutral-700">GST ({formData.gst_percentage}%)</span>
+                  <span className="text-sm text-neutral-700">GST</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -387,10 +461,29 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
                   />
                   <span className="text-sm text-neutral-700">Non-GST</span>
                 </label>
+                {formData.is_gst && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      name="gst_percentage"
+                      value={formData.gst_percentage}
+                      onChange={handleChange}
+                      className={cn(
+                        "w-20 px-3 py-1.5 text-sm",
+                        "bg-neutral-50 border border-neutral-200 rounded-lg",
+                        "focus:outline-none focus:ring-1 focus:ring-neutral-900/10"
+                      )}
+                      step="0.01"
+                      min="0"
+                      max="100"
+                    />
+                    <span className="text-sm text-neutral-700">%</span>
+                  </div>
+                )}
               </div>
 
               {/* Items Table */}
-              <div className="rounded-xl border border-neutral-200 overflow-hidden">
+              <div className="rounded-xl border border-neutral-200 overflow-visible">
                 <table className="w-full text-sm">
                   <thead className="bg-neutral-50">
                     <tr>
@@ -402,20 +495,24 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
                       <th className="px-2 py-2 w-8"></th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-neutral-100">
+                  <tbody>
                     {items.map((item, index) => (
-                      <tr key={index} className="hover:bg-neutral-50/50">
-                        <td className="px-3 py-2 text-neutral-500">{index + 1}</td>
-                        <td className="px-2 py-2">
-                          <SearchableDropdown
-                            options={productOptions}
-                            value={item.product_id}
-                            onChange={(val) => handleProductChange(index, val)}
-                            placeholder="Select Product"
-                            className="text-xs"
-                          />
+                      <tr key={index} className="hover:bg-neutral-50/50 border-b border-neutral-100">
+                        <td className="px-3 py-3 text-neutral-500 align-top">{index + 1}</td>
+                        <td className="px-2 py-3 relative align-top" style={{ minHeight: '60px' }}>
+                          <div className="relative" style={{ zIndex: 100 - index }}>
+                            <SearchableDropdown
+                              options={productOptions}
+                              value={item.product_id}
+                              onChange={(val) => handleProductChange(index, val)}
+                              placeholder="Select Product"
+                              className="text-xs"
+                              onOpenAddModal={(searchQuery) => handleAddProductClick(index, searchQuery)}
+                              addModalLabel="Add New Product"
+                            />
+                          </div>
                         </td>
-                        <td className="px-2 py-2">
+                        <td className="px-2 py-3 align-top">
                           <input
                             type="number"
                             value={item.quantity}
@@ -428,7 +525,7 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
                             min="1"
                           />
                         </td>
-                        <td className="px-2 py-2">
+                        <td className="px-2 py-3 align-top">
                           <input
                             type="number"
                             value={item.unit_price}
@@ -441,10 +538,10 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
                             step="0.01"
                           />
                         </td>
-                        <td className="px-3 py-2 text-right font-medium text-neutral-900">
+                        <td className="px-3 py-3 text-right font-medium text-neutral-900 align-top">
                           {formatCurrency(item.quantity * item.unit_price)}
                         </td>
-                        <td className="px-2 py-2 text-center">
+                        <td className="px-2 py-3 text-center align-top">
                           <button
                             onClick={() => removeItem(index)}
                             className="p-1 text-neutral-400 hover:text-red-500 rounded"
@@ -543,6 +640,19 @@ export default function PurchaseEditModal({ purchaseId, isOpen, onClose, onSave,
           </button>
         </div>
       </div>
+
+      {/* Add Product Modal */}
+      <AddProductModal
+        isOpen={showAddProductModal}
+        onClose={() => {
+          setShowAddProductModal(false);
+          setAddProductIndex(null);
+          setAddProductInitialName('');
+        }}
+        onProductAdded={handleProductAdded}
+        userId={userId}
+        initialName={addProductInitialName}
+      />
     </div>
   );
 }

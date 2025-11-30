@@ -205,6 +205,57 @@ export default function ProductsPage() {
     setIsDrawerOpen(false);
   }
 
+  async function handleAddCategory(categoryName) {
+    if (!userId || !categoryName.trim()) return null;
+
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .insert([{
+          user_id: userId,
+          name: categoryName.trim(),
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      notify.success('Category added successfully!');
+      await fetchCategories(userId);
+      return data;
+    } catch (error) {
+      console.error('Error adding category:', error);
+      notify.error('Failed to add category: ' + error.message);
+      return null;
+    }
+  }
+
+  async function handleAddUnit(unitName) {
+    if (!userId || !unitName.trim()) return null;
+
+    try {
+      const { data, error } = await supabase
+        .from('units')
+        .insert([{
+          user_id: userId,
+          name: unitName.trim(),
+          symbol: '',
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      notify.success('Unit added successfully!');
+      await fetchUnits(userId);
+      return data;
+    } catch (error) {
+      console.error('Error adding unit:', error);
+      notify.error('Failed to add unit: ' + error.message);
+      return null;
+    }
+  }
+
   function handleClearFilters() {
     setSearchQuery('');
     setFilterCategory('all');
@@ -608,6 +659,9 @@ export default function ProductsPage() {
         units={units}
         onSubmit={handleSubmit}
         isLoading={isLoading}
+        onAddCategory={handleAddCategory}
+        onAddUnit={handleAddUnit}
+        userId={userId}
       />
 
       {/* Delete Confirmation Modal */}

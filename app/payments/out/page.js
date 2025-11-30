@@ -17,8 +17,10 @@ export default function PaymentOutPage() {
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [user, setUser] = useState(null);
+  const [settings, setSettings] = useState(null);
 
   const [formData, setFormData] = useState({
+    receipt_no: '',
     date: new Date().toISOString().split('T')[0],
     supplier_id: '',
     payment_method: 'cash',
@@ -48,9 +50,50 @@ export default function PaymentOutPage() {
       if (data.success && data.user) {
         setUser(data.user);
         fetchSuppliers(data.user.id);
+        fetchSettings(data.user.id);
+        generateReceiptNo(data.user.id);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
+    }
+  }
+
+  async function fetchSettings(uid) {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('user_id', uid)
+        .single();
+
+      if (!error && data) {
+        setSettings(data);
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+    }
+  }
+
+  async function generateReceiptNo(uid) {
+    try {
+      // Fetch settings to get prefix and next number
+      const { data: settingsData, error: settingsError } = await supabase
+        .from('settings')
+        .select('payment_out_prefix, payment_out_next_number')
+        .eq('user_id', uid)
+        .single();
+
+      if (settingsError) throw settingsError;
+
+      const prefix = settingsData?.payment_out_prefix || 'PO-PAY';
+      const nextNumber = settingsData?.payment_out_next_number || 1;
+      const receiptNo = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
+
+      setFormData(prev => ({ ...prev, receipt_no: receiptNo }));
+    } catch (error) {
+      console.error('Error generating receipt number:', error);
+      // Fallback to default
+      setFormData(prev => ({ ...prev, receipt_no: 'PO-PAY-0001' }));
     }
   }
 
@@ -103,6 +146,7 @@ export default function PaymentOutPage() {
       // Insert payment
       const paymentData = {
         user_id: user.id,
+        receipt_no: formData.receipt_no,
         payment_date: formData.date,
         supplier_id: parseInt(formData.supplier_id),
         payment_method: formData.payment_method,
@@ -148,12 +192,21 @@ export default function PaymentOutPage() {
         transaction_type: 'payment',
         transaction_date: formData.date,
         reference_id: payment.id,
-        reference_no: `PAY-${payment.id}`,
+        reference_no: formData.receipt_no,
         debit: amount,
         credit: 0,
         balance: newBalance,
         description: `Payment made - ${formData.payment_method}`,
       }]);
+
+      // Increment payment_out_next_number in settings
+      if (settings) {
+        const nextNumber = (settings.payment_out_next_number || 1) + 1;
+        await supabase
+          .from('settings')
+          .update({ payment_out_next_number: nextNumber })
+          .eq('user_id', user.id);
+      }
 
       alert('Payment made successfully!');
       router.push('/dashboard');
@@ -188,7 +241,16 @@ export default function PaymentOutPage() {
               <CardTitle>Payment Details</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Input
+                  label="Receipt No *"
+                  name="receipt_no"
+                  value={formData.receipt_no}
+                  onChange={handleChange}
+                  required
+                  className="bg-red-50"
+                />
+
                 <Input
                   label="Date *"
                   name="date"

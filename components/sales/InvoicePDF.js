@@ -246,119 +246,171 @@ export async function generateInvoicePDF(invoice, items, settings, options = {})
   const tableStartY = drawHeader();
 
   // ===== TABLE =====
-  autoTable(doc, {
-    startY: tableStartY,
-    head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
-    body: tableBody,
-    foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
-    theme: 'grid',
-    headStyles: {
-      fillColor: [255, 255, 255],
-      textColor: [0, 0, 0],
-      fontStyle: 'bold',
-      fontSize: 10,
-      halign: 'center',
-      valign: 'middle',
-      lineWidth: 0.3,
-      lineColor: [0, 0, 0],
-    },
-    bodyStyles: {
-      fontSize: 10,
-      textColor: [0, 0, 0],
-      halign: 'center',
-      valign: 'middle',
-      lineWidth: 0,
-      lineColor: [255, 255, 255],
-      minCellHeight: 11,
-      cellPadding: { top: 0.75, right: 0.75, bottom: 0.75, left: 0.75 },
-    },
-    footStyles: {
-      fillColor: [255, 255, 255],
-      textColor: [0, 0, 0],
-      fontStyle: 'bold',
-      fontSize: 10,
-      halign: 'center',
-      valign: 'middle',
-      lineWidth: 0.3,
-      lineColor: [0, 0, 0],
-    },
-    columnStyles: {
-      0: { halign: 'center', cellWidth: 18 },
-      1: { halign: 'center', cellWidth: 52 },
-      2: { halign: 'center', cellWidth: 22 },
-      3: { halign: 'center', cellWidth: 22 },
-      4: { halign: 'center', cellWidth: 28 },
-      5: { halign: 'center', cellWidth: 25 },
-      6: { halign: 'center', cellWidth: 28 },
-    },
-    tableWidth: 195,
-    styles: {
-      overflow: 'linebreak',
-      cellPadding: 1.5,
-      font: 'helvetica',
-    },
-    margin: { left: (pageWidth - 195) / 2, right: (pageWidth - 195) / 2 },
-    showHead: 'everyPage',
-    showFoot: 'lastPage',
-    willDrawPage: function(data) {
-      if (data.pageNumber > 1) {
-        data.settings.startY = drawContinuationHeader();
+autoTable(doc, {
+  startY: y,
+  head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
+  body: simpleTableBody,
+  foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
+  theme: 'plain',
+  headStyles: {
+    fillColor: [255, 255, 255],
+    textColor: [0, 0, 0],
+    fontStyle: 'bold',
+    fontSize: 10,
+    halign: 'center',
+    valign: 'middle',
+    lineWidth: 0,
+    cellPadding: { top: 3, right: 0.75, bottom: 6, left: 0.75 },
+  },
+  bodyStyles: {
+    fontSize: 10,
+    textColor: [0, 0, 0],
+    halign: 'center',
+    valign: 'top',
+    lineWidth: 0,
+    lineColor: [255, 255, 255],
+    minCellHeight: 12,
+    cellPadding: { top: 3, right: 0.75, bottom: 2, left: 0.75 },
+  },
+  footStyles: {
+    fillColor: [255, 255, 255],
+    textColor: [0, 0, 0],
+    fontStyle: 'bold',
+    fontSize: 10,
+    halign: 'center',
+    valign: 'middle',
+    lineWidth: 0,
+    cellPadding: { top: 5, right: 0.75, bottom: 3, left: 0.75 },
+  },
+  columnStyles: {
+    0: { halign: 'center', cellWidth: 18 },
+    1: { halign: 'center', cellWidth: 52 },
+    
+    2: { halign: 'center', cellWidth: 22 },
+    3: { halign: 'center', cellWidth: 22 },
+    4: { halign: 'center', cellWidth: 28 },
+    5: { halign: 'center', cellWidth: 25 },
+    6: { halign: 'center', cellWidth: 28 },
+  },
+  tableWidth: 195,
+  styles: { overflow: 'linebreak', cellPadding: 1.5 },
+  margin: { left: (pageWidth - 195) / 2, right: (pageWidth - 195) / 2 },
+  showHead: 'everyPage',
+  showFoot: 'lastPage',
+willDrawPage: function(data) {
+  if (data.pageNumber > 1) {
+    // Draw continuation header text at top of page 2+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80, 80, 80);
+    doc.text(`Sale Order # ${order.order_no || order.invoice_no || '-'}`, margin, 12);
+    doc.text(`Customer PO # ${order.customer_po || '-'}`, pageWidth - margin, 12, { align: 'right' });
+    
+    // Set table start position below the continuation header
+    data.settings.startY = 32;
+  }
+},
+didDrawPage: function(data) {
+  // Draw border around header row with column separators
+  const headerRow = data.table.head[0];
+  if (headerRow && headerRow.cells[0]) {
+    const startX = headerRow.cells[0].x;
+    const startY = headerRow.cells[0].y;
+    const tableWidth = 195;
+    const borderHeight = headerRow.height - 3;
+    
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    
+    // Draw outer rectangle
+    doc.rect(startX, startY, tableWidth, borderHeight);
+    
+    // Draw vertical separators between columns
+    let currentX = startX;
+    const cells = headerRow.cells;
+    Object.keys(cells).forEach((key, i) => {
+      if (i < Object.keys(cells).length - 1) {
+        currentX += cells[key].width;
+        doc.line(currentX, startY, currentX, startY + borderHeight);
       }
-    },
-    willDrawCell: function(data) {
-      // Add extra top padding to first body row
-      if (data.section === 'body' && data.row.index === 0) {
-        data.cell.styles.cellPadding = { top: 4.5, right: 0.75, bottom: 0.75, left: 0.75 };
+    });
+  }
+  
+  // Draw border around footer row with column separators
+  const footerRow = data.table.foot[0];
+  if (footerRow && footerRow.cells[0]) {
+    const startX = footerRow.cells[0].x;
+    const startY = footerRow.cells[0].y;
+    const tableWidth = 195;
+    const footerHeight = footerRow.height;
+    
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    
+    // Draw outer rectangle
+    doc.rect(startX, startY, tableWidth, footerHeight);
+    
+    // Draw vertical separators between columns
+    let currentX = startX;
+    const cells = footerRow.cells;
+    Object.keys(cells).forEach((key, i) => {
+      if (i < Object.keys(cells).length - 1) {
+        currentX += cells[key].width;
+        doc.line(currentX, startY, currentX, startY + footerHeight);
       }
-    },
-    didDrawCell: function(data) {
-      // Custom rendering for Item Name column (column 1) in body
-      if (data.section === 'body' && data.column.index === 1) {
-        const itemData = itemsData[data.row.index];
-        if (itemData) {
-          const cellCenterX = data.cell.x + data.cell.width / 2;
-          const cellCenterY = data.cell.y + data.cell.height / 2;
+    });
+  }
+},
+  didDrawCell: function(data) {
+    // Custom rendering for Item Name column (column 1) in body
+    if (data.section === 'body' && data.column.index === 1) {
+      const itemData = itemsData[data.row.index];
+      if (itemData) {
+        const cellCenterX = data.cell.x + data.cell.width / 2;
+        const topY = data.cell.y + 6;
+        const bottomY = data.cell.y + 11;
 
-          if (itemData.category) {
-            // Draw product name (normal font, NOT bold, larger size)
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(0, 0, 0);
-            doc.text(itemData.productName, cellCenterX, cellCenterY - 2, { align: 'center' });
-            // Draw category (MUCH smaller font, black color, in brackets)
-            doc.setFontSize(7);
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(0, 0, 0);
-            doc.text(`(${itemData.category})`, cellCenterX, cellCenterY + 2, { align: 'center' });
-          } else {
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(0, 0, 0);
-            doc.text(itemData.productName, cellCenterX, cellCenterY, { align: 'center' });
-          }
-        }
-      }
-      // Custom rendering for Tax column (column 5) in body
-      if (data.section === 'body' && data.column.index === 5) {
-        const itemData = itemsData[data.row.index];
-        if (itemData) {
-          const cellCenterX = data.cell.x + data.cell.width / 2;
-          const cellCenterY = data.cell.y + data.cell.height / 2;
-
-          // Draw tax amount (larger font)
-          doc.setFontSize(10);
+        // Draw product name on top line - BLACK
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        doc.text(itemData.productName, cellCenterX, topY, { align: 'center' });
+        
+        // Draw category on bottom line - BLACK
+        if (itemData.category) {
+          doc.setFontSize(7);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
-          doc.text(itemData.taxAmt.toFixed(0), cellCenterX, cellCenterY - 2, { align: 'center' });
-
-          // Draw tax percentage (smaller but VISIBLE font, black)
-          doc.setFontSize(7);
-          doc.setTextColor(0, 0, 0);
-          doc.text(`(${itemData.taxPercent}%)`, cellCenterX, cellCenterY + 2, { align: 'center' });
+          doc.text(`(${itemData.category})`, cellCenterX, bottomY, { align: 'center' });
         }
       }
-    },
-  });
+    }
+     if (data.section === 'foot' && data.row.index === 0 && data.column.index === 0) {
+    data.cell.y += 2;  // Shift footer down by 2px
+  }
+    // Custom rendering for Tax column (column 5) in body
+    if (data.section === 'body' && data.column.index === 5) {
+      const itemData = itemsData[data.row.index];
+      if (itemData) {
+        const cellCenterX = data.cell.x + data.cell.width / 2;
+        const topY = data.cell.y + 6;
+        const bottomY = data.cell.y + 11;
+
+        // Draw tax amount on top line - BLACK
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        doc.text(formatCurrency(itemData.taxAmt), cellCenterX, topY, { align: 'center' });
+
+        // Draw tax percentage on bottom line - BLACK
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        doc.text(`(${itemData.taxPercent}%)`, cellCenterX, bottomY, { align: 'center' });
+      }
+    }
+  },
+});
 
   totalPages = doc.internal.getNumberOfPages();
   let finalY = doc.lastAutoTable.finalY + 10;
@@ -488,7 +540,6 @@ export async function generateSalesReportPDF(invoices, totalAmount) {
 
   doc.save(`sales-report-${new Date().toISOString().split('T')[0]}.pdf`);
 }
-
 /**
  * Generate Sale Order PDF
  */
@@ -610,23 +661,23 @@ export async function generateSaleOrderPDF(order, items, settings, options = {})
 
   y += 24;
 
-  // Table - use simple format for Item Name column, custom draw for Tax column
+  // Table body data
   const simpleTableBody = itemsData.map((item) => [
     String(item.idx),
-    '', // Empty - will be custom drawn
+    '',
     String(item.qty),
     item.unit,
     item.price.toFixed(2),
-    '', // Empty - will be custom drawn
+    '',
     formatCurrency(item.amount)
   ]);
 
-  autoTable(doc, {
+autoTable(doc, {
     startY: y,
     head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
     body: simpleTableBody,
     foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
-    theme: 'grid',
+    theme: 'plain',
     headStyles: {
       fillColor: [255, 255, 255],
       textColor: [0, 0, 0],
@@ -634,29 +685,29 @@ export async function generateSaleOrderPDF(order, items, settings, options = {})
       fontSize: 10,
       halign: 'center',
       valign: 'middle',
-      lineWidth: 0.3,
-      lineColor: [0, 0, 0],
+      lineWidth: 0,
+      cellPadding: { top: 3, right: 0.75, bottom: 6, left: 0.75 },
     },
     bodyStyles: {
       fontSize: 10,
       textColor: [0, 0, 0],
       halign: 'center',
-      valign: 'middle',
+      valign: 'top',
       lineWidth: 0,
       lineColor: [255, 255, 255],
-      minCellHeight: 11,
-      cellPadding: { top: 0.75, right: 0.75, bottom: 0.75, left: 0.75 },
+      minCellHeight: 12,
+      cellPadding: { top: 3, right: 0.75, bottom: 2, left: 0.75 },
     },
-    footStyles: {
-      fillColor: [255, 255, 255],
-      textColor: [0, 0, 0],
-      fontStyle: 'bold',
-      fontSize: 10,
-      halign: 'center',
-      valign: 'middle',
-      lineWidth: 0.3,
-      lineColor: [0, 0, 0],
-    },
+   footStyles: {
+  fillColor: [255, 255, 255],
+  textColor: [0, 0, 0],
+  fontStyle: 'bold',
+  fontSize: 10,
+  halign: 'center',
+  valign: 'middle',
+  lineWidth: 0,
+cellPadding: { top:6, right: 0.75, bottom: 1, left: 0.75 },
+},
     columnStyles: {
       0: { halign: 'center', cellWidth: 18 },
       1: { halign: 'center', cellWidth: 52 },
@@ -671,82 +722,176 @@ export async function generateSaleOrderPDF(order, items, settings, options = {})
     margin: { left: (pageWidth - 195) / 2, right: (pageWidth - 195) / 2 },
     showHead: 'everyPage',
     showFoot: 'lastPage',
-    willDrawCell: function(data) {
-      // Add extra top padding to first body row
-      if (data.section === 'body' && data.row.index === 0) {
-        data.cell.styles.cellPadding = { top: 4.5, right: 0.75, bottom: 0.75, left: 0.75 };
-      }
-    },
+willDrawPage: function (data) {
+  if (data.pageNumber > 1) {
+    const topY = 10;           // Moves it very close to the top
+    const lineY = topY + 6;    // Line just below the text
+
+    // Continuation header – clean, non-bold, full width
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');  // ← NOT bold
+    doc.setTextColor(80, 80, 80);        // Subtle gray (professional look)
+
+    // Left: Sale Order #
+    doc.text(
+      `${order.order_no || order.invoice_no || 'N/A'}`,
+      margin,
+      topY
+    );
+
+    // Right: Customer PO #
+    doc.text(
+      `Customer PO # ${order.customer_po || '-'}`,
+      pageWidth - margin,
+      topY,
+      { align: 'right' }
+    );
+
+    // Light separator line (very subtle)
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.3);
+    doc.line(margin, lineY, pageWidth - margin, lineY);
+
+    // Give table enough space to start cleanly below
+    data.settings.startY = lineY + 8;  // Starts table at ~24mm — perfect spacing
+  }
+},
+didDrawPage: function(data) {
+  const currentPage = data.pageNumber;
+  
+  // Draw border around header row with column separators
+  const headerRow = data.table.head[0];
+  if (headerRow && headerRow.cells[0]) {
+    const startX = headerRow.cells[0].x;
+    const startY = headerRow.cells[0].y;
+    const tableWidth = 195;
+    const borderHeight = headerRow.height - 3;
+    
+    // Page 1: header starts around y=84, Page 2+: header starts around y=38
+    // Skip ghost headers that appear at y < 10
+    if (startY >= 10) {
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.3);
+      
+      // Draw outer rectangle
+      doc.rect(startX, startY, tableWidth, borderHeight);
+      
+      // Draw vertical separators between columns
+      let currentX = startX;
+      const cells = headerRow.cells;
+      Object.keys(cells).forEach((key, i) => {
+        if (i < Object.keys(cells).length - 1) {
+          currentX += cells[key].width;
+          doc.line(currentX, startY, currentX, startY + borderHeight);
+        }
+      });
+    }
+  }
+  
+  // Draw border around footer row WITHOUT vertical separators
+  const footerRow = data.table.foot[0];
+  if (footerRow && footerRow.cells[0]) {
+    const startX = footerRow.cells[0].x;
+    const startY = footerRow.cells[0].y;
+    const tableWidth = 195;
+    const footerHeight = footerRow.height;
+    
+    if (startY >= 10) {
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.3);
+      
+      // ← CHANGED: Draw ONLY horizontal lines (top and bottom)
+      // Top horizontal line
+      doc.line(startX, startY, startX + tableWidth, startY);
+      
+      // Bottom horizontal line
+      doc.line(startX, startY + footerHeight, startX + tableWidth, startY + footerHeight);
+      
+      // ← REMOVED: No vertical column separators in footer
+    }
+  }
+},
+
     didDrawCell: function(data) {
       // Custom rendering for Item Name column (column 1) in body
       if (data.section === 'body' && data.column.index === 1) {
         const itemData = itemsData[data.row.index];
         if (itemData) {
           const cellCenterX = data.cell.x + data.cell.width / 2;
-          const cellCenterY = data.cell.y + data.cell.height / 2;
+          const topY = data.cell.y + 6;
+          const bottomY = data.cell.y + 11;
 
+          // Draw product name - BLACK
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(0, 0, 0);
+          doc.text(itemData.productName, cellCenterX, topY, { align: 'center' });
+          
+          // Draw category - BLACK
           if (itemData.category) {
-            // Draw product name (normal font, NOT bold, larger size)
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(0, 0, 0);
-            doc.text(itemData.productName, cellCenterX, cellCenterY - 2, { align: 'center' });
-            // Draw category (MUCH smaller font, black color, in brackets)
             doc.setFontSize(7);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(0, 0, 0);
-            doc.text(`(${itemData.category})`, cellCenterX, cellCenterY + 2, { align: 'center' });
-          } else {
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(0, 0, 0);
-            doc.text(itemData.productName, cellCenterX, cellCenterY, { align: 'center' });
+            doc.text(`(${itemData.category})`, cellCenterX, bottomY, { align: 'center' });
           }
         }
       }
+      
       // Custom rendering for Tax column (column 5) in body
       if (data.section === 'body' && data.column.index === 5) {
         const itemData = itemsData[data.row.index];
         if (itemData) {
           const cellCenterX = data.cell.x + data.cell.width / 2;
-          const cellCenterY = data.cell.y + data.cell.height / 2;
+          const topY = data.cell.y + 6;
+          const bottomY = data.cell.y + 11;
 
-          // Draw tax amount (larger font)
+          // Draw tax amount - BLACK
           doc.setFontSize(10);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
-          doc.text(itemData.taxAmt.toFixed(0), cellCenterX, cellCenterY - 2, { align: 'center' });
+          doc.text(formatCurrency(itemData.taxAmt), cellCenterX, topY, { align: 'center' });
 
-          // Draw tax percentage (smaller but VISIBLE font, black)
+          // Draw tax percentage - BLACK
           doc.setFontSize(7);
+          doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
-          doc.text(`(${itemData.taxPercent}%)`, cellCenterX, cellCenterY + 2, { align: 'center' });
+          doc.text(`(${itemData.taxPercent}%)`, cellCenterX, bottomY, { align: 'center' });
         }
       }
+      if (data.section === 'foot' && data.row.index === 0) {
+    data.cell.y += 3;  // Shift ENTIRE footer row down (all columns)
+}
     },
   });
 
   let finalY = doc.lastAutoTable.finalY + 10;
 
-  // Check if we need a new page for footer (need ~70mm space)
+  // Check if we need a new page for footer
   if (finalY > pageHeight - 70) {
     doc.addPage();
     finalY = 20;
   }
+// Amount in words - aligned with TOTAL (no shift)
+const tableStartX = (pageWidth - 195) / 2;  // Same as TOTAL alignment
+doc.setFontSize(8);
+doc.setFont('helvetica', 'bold');
+doc.setTextColor(0, 0, 0);
+doc.text('ORDER AMOUNT IN WORDS', tableStartX, finalY);
 
-  // Amount in words - on separate line
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(0, 0, 0);
-  doc.text('ORDER AMOUNT IN WORDS', margin, finalY);
+// Amount text on same line, unbold
+doc.setFont('helvetica', 'normal');
+doc.setFontSize(9);
+const labelWidth = doc.getTextWidth('ORDER AMOUNT IN WORDS');
+doc.text(numberToWords(Math.round(totalAmount)).toUpperCase(), tableStartX + labelWidth + 5, finalY);
 
-  finalY += 5;
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(0, 0, 0);
-  doc.text(numberToWords(Math.round(totalAmount)).toUpperCase(), margin, finalY);
+// Draw line below spanning table width
+finalY += 2;
+doc.setDrawColor(0, 0, 0);
+doc.setLineWidth(0.3);
+const tableEndX = tableStartX + 195;
+doc.line(tableStartX, finalY, tableEndX, finalY);
 
-  finalY += 12;
+finalY += 10;
 
   // Summary
   const summaryLabels = ['ORDER AMOUNT', 'TAXABLE AMOUNT', 'RATE', 'TAX AMOUNT'];
@@ -755,7 +900,7 @@ export async function generateSaleOrderPDF(order, items, settings, options = {})
   const summaryColors = [[0,0,0], [0,123,255], [0,0,0], [220,53,69]];
   const colW = (pageWidth - margin * 2) / 4;
 
-  doc.setFontSize(7);
+  doc.setFontSize(9);
   summaryLabels.forEach((label, i) => {
     const x = margin + (i * colW) + (colW / 2);
     doc.setTextColor(128, 128, 128);
@@ -767,42 +912,44 @@ export async function generateSaleOrderPDF(order, items, settings, options = {})
   });
 
   finalY += 8;
-  doc.setFontSize(9);
+  doc.setFontSize(11);
   summaryValues.forEach((val, i) => {
     const x = margin + (i * colW) + (colW / 2);
     doc.setTextColor(...summaryColors[i]);
     doc.text(val, x, finalY, { align: 'center' });
   });
 
-  // Signature - positioned relative to content, not fixed to bottom
-  finalY += 20;
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 0, 0);
-  doc.text(`For, ${settings?.company_name || 'COMPANY'}`, pageWidth - margin, finalY, { align: 'right' });
-  if (images.signature) try { doc.addImage(images.signature, 'PNG', pageWidth - margin - 45, finalY + 4, 42, 16); } catch (e) { }
-  doc.setDrawColor(128, 128, 128);
-  doc.setLineWidth(0.3);
-  doc.line(pageWidth - margin - 50, finalY + 24, pageWidth - margin, finalY + 24);
-  doc.setFontSize(9);
-  doc.setTextColor(128, 128, 128);
-  doc.text('Authorized Authority', pageWidth - margin - 25, finalY + 30, { align: 'center' });
-
-  // Page numbers
+// Signature - positioned at bottom with space for page number
+const sigY = pageHeight - 60;  // Changed from 45 to 60 for more clearance
+doc.setFontSize(10);
+doc.setFont('helvetica', 'normal');
+doc.setTextColor(0, 0, 0);
+doc.text(`For, ${settings?.company_name || 'COMPANY'}`, pageWidth - margin, sigY, { align: 'right' });
+if (images.signature) try { doc.addImage(images.signature, 'PNG', pageWidth - margin - 45, sigY + 4, 42, 16); } catch (e) { }
+doc.setDrawColor(128, 128, 128);
+doc.setLineWidth(0.3);
+doc.line(pageWidth - margin - 50, sigY + 24, pageWidth - margin, sigY + 24);
+doc.setFontSize(9);
+doc.setTextColor(128, 128, 128);
+doc.text('Authorized Authority', pageWidth - margin - 25, sigY + 30, { align: 'center' });  // ===== PAGE NUMBERS WITH LINE ABOVE =====
   const totalPages = doc.internal.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
+    
+    // Draw horizontal line above page number
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.4);
+    doc.line(margin, pageHeight - 18, pageWidth - margin, pageHeight - 18);
+    
+    // Draw page number
     doc.setFontSize(9);
-    doc.setTextColor(128, 128, 128);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
     doc.text(`page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
   }
 
   return doc;
 }
-
-/**
- * Download Sale Order PDF
- */
 export async function downloadSaleOrderPDF(order, items, settings, options = {}, shouldPrint = false) {
   try {
     const doc = await generateSaleOrderPDF(order, items, settings, options);

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 
-export default function ProductForm({ product, categories, units, onSubmit, onCancel, isLoading }) {
+export default function ProductForm({ product, categories, units, onSubmit, onCancel, isLoading, onAddCategory, onAddUnit, userId }) {
   const [formData, setFormData] = useState({
     name: '',
     category_id: '',
@@ -19,6 +19,8 @@ export default function ProductForm({ product, categories, units, onSubmit, onCa
   const [unitInput, setUnitInput] = useState('');
   const [showCategoryAdd, setShowCategoryAdd] = useState(false);
   const [showUnitAdd, setShowUnitAdd] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [addingUnit, setAddingUnit] = useState(false);
 
   useEffect(() => {
     if (product) {
@@ -44,6 +46,42 @@ export default function ProductForm({ product, categories, units, onSubmit, onCa
   const handleSubmit = (e) => {
     e.preventDefault();
     onSubmit(formData);
+  };
+
+  const handleAddCategory = async () => {
+    if (!categoryInput.trim() || !onAddCategory) return;
+
+    setAddingCategory(true);
+    try {
+      const newCategory = await onAddCategory(categoryInput.trim());
+      if (newCategory) {
+        setFormData(prev => ({ ...prev, category_id: newCategory.id }));
+      }
+      setCategoryInput('');
+      setShowCategoryAdd(false);
+    } catch (error) {
+      console.error('Error adding category:', error);
+    } finally {
+      setAddingCategory(false);
+    }
+  };
+
+  const handleAddUnit = async () => {
+    if (!unitInput.trim() || !onAddUnit) return;
+
+    setAddingUnit(true);
+    try {
+      const newUnit = await onAddUnit(unitInput.trim());
+      if (newUnit) {
+        setFormData(prev => ({ ...prev, unit_id: newUnit.id }));
+      }
+      setUnitInput('');
+      setShowUnitAdd(false);
+    } catch (error) {
+      console.error('Error adding unit:', error);
+    } finally {
+      setAddingUnit(false);
+    }
   };
 
   return (
@@ -105,14 +143,11 @@ export default function ProductForm({ product, categories, units, onSubmit, onCa
               />
               <button
                 type="button"
-                onClick={() => {
-                  // This would call a prop function to add the category
-                  setCategoryInput('');
-                  setShowCategoryAdd(false);
-                }}
-                className="px-3 py-2 bg-neutral-900 text-white rounded-xl hover:bg-neutral-800 transition-all text-sm font-medium"
+                onClick={handleAddCategory}
+                disabled={addingCategory || !categoryInput.trim()}
+                className="px-3 py-2 bg-neutral-900 text-white rounded-xl hover:bg-neutral-800 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Save
+                {addingCategory ? 'Saving...' : 'Save'}
               </button>
               <button
                 type="button"
@@ -170,14 +205,11 @@ export default function ProductForm({ product, categories, units, onSubmit, onCa
               />
               <button
                 type="button"
-                onClick={() => {
-                  // This would call a prop function to add the unit
-                  setUnitInput('');
-                  setShowUnitAdd(false);
-                }}
-                className="px-3 py-2 bg-neutral-900 text-white rounded-xl hover:bg-neutral-800 transition-all text-sm font-medium"
+                onClick={handleAddUnit}
+                disabled={addingUnit || !unitInput.trim()}
+                className="px-3 py-2 bg-neutral-900 text-white rounded-xl hover:bg-neutral-800 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Save
+                {addingUnit ? 'Saving...' : 'Save'}
               </button>
               <button
                 type="button"

@@ -25,23 +25,33 @@ export async function POST(request) {
       );
     }
 
-    // Set cookie with user ID
+    // Set cookies with user ID and userType
     const response = NextResponse.json({
       success: true,
       user: result.user,
     });
 
-    console.log('Setting auth-user cookie with userId:', result.user.id);
+    console.log('Setting cookies - userId:', result.user.id, 'userType:', result.user.userType);
 
+    // Store user ID
     response.cookies.set('auth-user', String(result.user.id), {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7, // 7 days
       path: '/',
-    });+
+    });
 
-    console.log('Cookie set successfully');
+    // Store user type (superadmin or staff)
+    response.cookies.set('auth-type', result.user.userType, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      path: '/',
+    });
+
+    console.log('Cookies set successfully');
 
     return response;
   } catch (error) {

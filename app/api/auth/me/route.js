@@ -6,19 +6,20 @@ export async function GET(request) {
   try {
     const cookieStore = await cookies();
     const userId = cookieStore.get('auth-user')?.value;
+    const userType = cookieStore.get('auth-type')?.value;
 
-    console.log('/api/auth/me called, userId exists:', !!userId);
+    console.log('/api/auth/me called - userId:', userId, 'userType:', userType);
 
-    if (!userId) {
-      console.log('No userId found in cookies');
+    if (!userId || !userType) {
+      console.log('No userId or userType found in cookies');
       return NextResponse.json(
         { success: false, error: 'Not authenticated' },
         { status: 401 }
       );
     }
 
-    console.log('UserId found, fetching user...');
-    const user = await getUserById(userId);
+    console.log('Fetching user with type:', userType);
+    const user = await getUserById(userId, userType);
     console.log('User fetch result:', user ? 'valid' : 'invalid');
 
     if (!user) {
@@ -29,7 +30,7 @@ export async function GET(request) {
       );
     }
 
-    console.log('User authenticated successfully:', user.username);
+    console.log('User authenticated successfully:', user.username, 'type:', user.userType);
     return NextResponse.json({ success: true, user });
   } catch (error) {
     console.error('Auth check error:', error);

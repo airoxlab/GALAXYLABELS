@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/AuthContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   Home,
   Receipt,
@@ -32,109 +34,241 @@ import {
   BookOpen,
 } from "lucide-react";
 
-const menuItems = [
+// Menu items with permission requirements
+const getMenuItems = (hasPermission) => [
   {
     title: "Dashboard",
     icon: <LayoutDashboard className="w-5 h-5" />,
     href: "/dashboard",
+    // Dashboard is always visible
   },
   {
     title: "Sales",
     icon: <Receipt className="w-5 h-5" />,
     href: "/sales",
+    permission: () => hasPermission('sales_order_view') || hasPermission('sales_invoice_view'),
     subItems: [
-      { title: "New Sale Order", href: "/sales/sale-order", icon: <Receipt className="w-4 h-4" /> },
-      { title: "Sales Order History", href: "/sales", icon: <ClipboardList className="w-4 h-4" /> },
-      { title: "Sale Invoice", href: "/sales/sale-invoice", icon: <FileText className="w-4 h-4" /> },
-      { title: "Invoice History", href: "/sales/invoice-history", icon: <History className="w-4 h-4" /> },
+      {
+        title: "New Sale Order",
+        href: "/sales/sale-order",
+        icon: <Receipt className="w-4 h-4" />,
+        permission: () => hasPermission('sales_order_view')
+      },
+      {
+        title: "Sales Order History",
+        href: "/sales",
+        icon: <ClipboardList className="w-4 h-4" />,
+        permission: () => hasPermission('sales_invoice_view')
+      },
     ],
   },
   {
     title: "Purchases",
     icon: <ShoppingCart className="w-5 h-5" />,
     href: "/purchases",
+    permission: () => hasPermission('purchase_order_view') || hasPermission('purchase_view'),
     subItems: [
-      { title: "New Purchase Order", href: "/purchases/purchase-order", icon: <Plus className="w-4 h-4" /> },
-      { title: "Purchase History", href: "/purchases", icon: <ClipboardList className="w-4 h-4" /> },
+      {
+        title: "New Purchase Order",
+        href: "/purchases/purchase-order",
+        icon: <Plus className="w-4 h-4" />,
+        permission: () => hasPermission('purchase_order_view')
+      },
+      {
+        title: "Purchase History",
+        href: "/purchases",
+        icon: <ClipboardList className="w-4 h-4" />,
+        permission: () => hasPermission('purchase_view')
+      },
     ],
   },
   {
     title: "Products",
     icon: <Package className="w-5 h-5" />,
     href: "/products",
+    permission: () => hasPermission('products_view'),
   },
   {
     title: "Customers",
     icon: <Users className="w-5 h-5" />,
     href: "/customers",
+    permission: () => hasPermission('customers_view'),
   },
   {
     title: "Suppliers",
     icon: <Building2 className="w-5 h-5" />,
     href: "/suppliers",
+    permission: () => hasPermission('suppliers_view'),
   },
   {
     title: "Stock",
     icon: <Archive className="w-5 h-5" />,
     href: "/stock",
+    permission: () => hasPermission('stock_in_view') || hasPermission('stock_out_view') || hasPermission('stock_availability_view') || hasPermission('low_stock_view'),
     subItems: [
-      { title: "Stock In", href: "/stock/in", icon: <ArrowDownToLine className="w-4 h-4" /> },
-      { title: "Stock Out", href: "/stock/out", icon: <ArrowUpFromLine className="w-4 h-4" /> },
-      { title: "Stock Availability", href: "/stock/availability", icon: <BarChart3 className="w-4 h-4" /> },
-      { title: "Low Stock", href: "/stock/low-stock", icon: <AlertTriangle className="w-4 h-4" /> },
+      {
+        title: "Stock In",
+        href: "/stock/in",
+        icon: <ArrowDownToLine className="w-4 h-4" />,
+        permission: () => hasPermission('stock_in_view')
+      },
+      {
+        title: "Stock Out",
+        href: "/stock/out",
+        icon: <ArrowUpFromLine className="w-4 h-4" />,
+        permission: () => hasPermission('stock_out_view')
+      },
+      {
+        title: "Stock Availability",
+        href: "/stock/availability",
+        icon: <BarChart3 className="w-4 h-4" />,
+        permission: () => hasPermission('stock_availability_view')
+      },
+      {
+        title: "Low Stock",
+        href: "/stock/low-stock",
+        icon: <AlertTriangle className="w-4 h-4" />,
+        permission: () => hasPermission('low_stock_view')
+      },
     ],
   },
   {
     title: "Warehouses",
     icon: <Warehouse className="w-5 h-5" />,
     href: "/warehouses",
+    permission: () => hasPermission('warehouses_view'),
   },
   {
     title: "Payments",
     icon: <DollarSign className="w-5 h-5" />,
     href: "/payments",
+    permission: () => hasPermission('payment_in_view') || hasPermission('payment_out_view') || hasPermission('payment_history_view'),
     subItems: [
-      { title: "Payment In", href: "/payments/in", icon: <ArrowDownRight className="w-4 h-4" /> },
-      { title: "Payment Out", href: "/payments/out", icon: <ArrowUpRight className="w-4 h-4" /> },
-      { title: "Payment History", href: "/payments/history", icon: <History className="w-4 h-4" /> },
+      {
+        title: "Payment In",
+        href: "/payments/in",
+        icon: <ArrowDownRight className="w-4 h-4" />,
+        permission: () => hasPermission('payment_in_view')
+      },
+      {
+        title: "Payment Out",
+        href: "/payments/out",
+        icon: <ArrowUpRight className="w-4 h-4" />,
+        permission: () => hasPermission('payment_out_view')
+      },
+      {
+        title: "Payment History",
+        href: "/payments/history",
+        icon: <History className="w-4 h-4" />,
+        permission: () => hasPermission('payment_history_view')
+      },
     ],
   },
   {
     title: "Ledgers",
     icon: <BookOpen className="w-5 h-5" />,
     href: "/ledgers",
+    permission: () => hasPermission('customer_ledger_view') || hasPermission('supplier_ledger_view'),
     subItems: [
-      { title: "Customer Ledger", href: "/ledgers/customer", icon: <Users className="w-4 h-4" /> },
-      { title: "Supplier Ledger", href: "/ledgers/supplier", icon: <Building2 className="w-4 h-4" /> },
+      {
+        title: "Customer Ledger",
+        href: "/ledgers/customer",
+        icon: <Users className="w-4 h-4" />,
+        permission: () => hasPermission('customer_ledger_view')
+      },
+      {
+        title: "Supplier Ledger",
+        href: "/ledgers/supplier",
+        icon: <Building2 className="w-4 h-4" />,
+        permission: () => hasPermission('supplier_ledger_view')
+      },
     ],
   },
   {
     title: "Expenses",
     icon: <CreditCard className="w-5 h-5" />,
     href: "/expenses",
+    permission: () => hasPermission('expenses_view'),
   },
   {
     title: "Reports",
     icon: <FileText className="w-5 h-5" />,
     href: "/reports",
+    permission: () => hasPermission('reports_view'),
   },
   {
     title: "Settings",
     icon: <Settings className="w-5 h-5" />,
     href: "/settings",
+    permission: () => hasPermission('settings_view'),
   },
 ];
 
 export default function Sidebar({ isOpen, onClose, companySettings }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { user, loading } = useAuth();
+  const { hasPermission, isSuperadmin, permissions } = usePermissions();
   const [expandedMenus, setExpandedMenus] = useState({});
+  const [visibleMenuItems, setVisibleMenuItems] = useState([]);
+
+  // Debug: Log permissions
+  useEffect(() => {
+    console.log('Sidebar - User:', user);
+    console.log('Sidebar - Is Superadmin:', isSuperadmin);
+    console.log('Sidebar - Permissions:', permissions);
+    console.log('Sidebar - Loading:', loading);
+  }, [user, isSuperadmin, permissions, loading]);
+
+  // Calculate menu items when auth state changes
+  useEffect(() => {
+    // Don't calculate menu until auth is loaded
+    if (loading) {
+      console.log('Sidebar - Still loading auth, skipping menu calculation');
+      return;
+    }
+
+    console.log('Sidebar - Calculating menu items with isSuperadmin:', isSuperadmin, 'permissions:', permissions);
+
+    // Get menu items with permission filtering
+    const menuItems = getMenuItems(hasPermission);
+
+    // Process menu items - show all but mark unauthorized ones
+    const processedItems = menuItems.map(item => {
+      // Always allow Dashboard
+      if (!item.permission) {
+        return { ...item, isAuthorized: true };
+      }
+
+      // Check if user has permission
+      const isAuthorized = item.permission ? item.permission() : true;
+
+      // Debug logging
+      console.log(`Menu item "${item.title}" - isAuthorized:`, isAuthorized);
+
+      // If has subitems, filter them
+      let visibleSubItems = [];
+      if (item.subItems) {
+        visibleSubItems = item.subItems.filter(subItem => {
+          if (!subItem.permission) return true;
+          const hasSubPermission = subItem.permission();
+          console.log(`  Sub-item "${subItem.title}" - hasPermission:`, hasSubPermission);
+          return hasSubPermission;
+        });
+      }
+
+      return { ...item, isAuthorized, visibleSubItems };
+    });
+
+    console.log('Sidebar - Processed menu items:', processedItems.map(i => ({ title: i.title, isAuthorized: i.isAuthorized })));
+    setVisibleMenuItems(processedItems);
+  }, [isSuperadmin, permissions, loading]);
 
   // Auto-expand submenus when a submenu page is active
   useEffect(() => {
-    menuItems.forEach((item) => {
-      if (item.subItems) {
-        const isSubItemActive = item.subItems.some(
+    visibleMenuItems.forEach((item) => {
+      if (item.visibleSubItems && item.visibleSubItems.length > 0) {
+        const isSubItemActive = item.visibleSubItems.some(
           (subItem) => pathname === subItem.href || pathname?.startsWith(subItem.href + '/')
         );
         if (isSubItemActive) {
@@ -149,14 +283,21 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', {
+      const response = await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'include',
       });
-      router.push('/login');
+
+      if (response.ok) {
+        // Force a hard reload to clear all state
+        window.location.href = '/login';
+      } else {
+        router.push('/login');
+      }
     } catch (error) {
       console.error('Logout error:', error);
-      router.push('/login');
+      // Still redirect even if there's an error
+      window.location.href = '/login';
     }
   };
 
@@ -203,8 +344,8 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                 <h1 className="text-base font-bold text-white tracking-wide truncate">
                   {companySettings?.company_name || 'Company Name'}
                 </h1>
-                {companySettings?.email_1 && (
-                  <p className="text-xs text-white/70 truncate">{companySettings.email_1}</p>
+                {user?.email && (
+                  <p className="text-xs text-white/70 truncate">{user.email}</p>
                 )}
               </div>
             </div>
@@ -213,8 +354,8 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto px-3 py-4 scrollbar-hide">
             <div className="flex flex-col gap-0.5">
-              {menuItems.map((item) => {
-                const hasSubItems = item.subItems && item.subItems.length > 0;
+              {visibleMenuItems.map((item) => {
+                const hasSubItems = item.visibleSubItems && item.visibleSubItems.length > 0;
                 const isExpanded = expandedMenus[item.title];
                 const isItemActive = isActive(item.href);
 
@@ -222,62 +363,90 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                   <div key={item.title}>
                     {hasSubItems ? (
                       <button
-                        onClick={() => toggleMenu(item.title)}
+                        onClick={() => item.isAuthorized && toggleMenu(item.title)}
+                        disabled={!item.isAuthorized}
                         className={cn(
                           "w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg transition-all duration-200",
+                          !item.isAuthorized && "opacity-60 cursor-not-allowed",
                           isItemActive
                             ? "bg-gradient-to-r from-neutral-800 to-neutral-900 text-white shadow-md shadow-neutral-500/20"
                             : "text-slate-600 hover:bg-slate-100/80"
                         )}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
                           <span className={cn(
-                            "transition-colors",
+                            "transition-colors flex-shrink-0",
                             isItemActive ? "text-white" : "text-slate-400"
                           )}>
                             {item.icon}
                           </span>
-                          <span className="text-sm font-medium">
-                            {item.title}
-                          </span>
+                          <div className="flex flex-col items-start flex-1 min-w-0">
+                            <span className="text-sm font-medium">
+                              {item.title}
+                            </span>
+                            {!item.isAuthorized && (
+                              <span className="text-xs text-red-500 font-normal">
+                                Not Authorized
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <ChevronDown
                           className={cn(
-                            "w-4 h-4 transition-transform duration-200",
+                            "w-4 h-4 transition-transform duration-200 flex-shrink-0",
                             isExpanded ? "rotate-180" : "",
                             isItemActive ? "text-white" : "text-slate-400"
                           )}
                         />
                       </button>
                     ) : (
-                      <Link
-                        href={item.href}
-                        onClick={() => {
-                          if (window.innerWidth < 1024) {
-                            onClose();
-                          }
-                        }}
-                        className={cn(
-                          "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200",
-                          isItemActive
-                            ? "bg-gradient-to-r from-neutral-800 to-neutral-900 text-white shadow-md shadow-neutral-500/20"
-                            : "text-slate-600 hover:bg-slate-100/80"
-                        )}
-                      >
-                        <span className={cn(
-                          "transition-colors",
-                          isItemActive ? "text-white" : "text-slate-400"
-                        )}>
-                          {item.icon}
-                        </span>
-                        <span className="text-sm font-medium">{item.title}</span>
-                      </Link>
+                      item.isAuthorized ? (
+                        <Link
+                          href={item.href}
+                          onClick={() => {
+                            if (window.innerWidth < 1024) {
+                              onClose();
+                            }
+                          }}
+                          className={cn(
+                            "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200",
+                            isItemActive
+                              ? "bg-gradient-to-r from-neutral-800 to-neutral-900 text-white shadow-md shadow-neutral-500/20"
+                              : "text-slate-600 hover:bg-slate-100/80"
+                          )}
+                        >
+                          <span className={cn(
+                            "transition-colors",
+                            isItemActive ? "text-white" : "text-slate-400"
+                          )}>
+                            {item.icon}
+                          </span>
+                          <span className="text-sm font-medium">{item.title}</span>
+                        </Link>
+                      ) : (
+                        <div
+                          className={cn(
+                            "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 opacity-60 cursor-not-allowed",
+                            "text-slate-600"
+                          )}
+                        >
+                          <span className="transition-colors text-slate-400">
+                            {item.icon}
+                          </span>
+                          <div className="flex flex-col items-start flex-1">
+                            <span className="text-sm font-medium">{item.title}</span>
+                            <span className="text-xs text-red-500">
+                              Not Authorized
+                            </span>
+                          </div>
+                        </div>
+                      )
                     )}
 
                     {/* Sub-menu items */}
                     {hasSubItems && isExpanded && (
                       <div className="ml-3 mt-0.5 space-y-0.5">
-                        {item.subItems.map((subItem) => (
+                        {item.visibleSubItems.map((subItem) => (
                           <Link
                             key={subItem.href}
                             href={subItem.href}

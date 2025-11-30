@@ -11,8 +11,6 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import {
   ChevronLeft,
   Plus,
@@ -35,7 +33,7 @@ import {
   Printer
 } from 'lucide-react';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
-import { downloadPurchaseOrderPDF } from '@/components/purchases/PurchasePDF';
+import { downloadPurchaseOrderPDF, generatePurchasesReportPDF } from '@/components/purchases/PurchasePDF';
 
 export default function PurchasesPage() {
   const router = useRouter();
@@ -416,39 +414,9 @@ export default function PurchasesPage() {
     setCurrentPage(1);
   }
 
-  function handleExportPDF() {
+  async function handleExportPDF() {
     try {
-      const doc = new jsPDF();
-
-      doc.setFontSize(18);
-      doc.text('Purchase Orders Report', 14, 20);
-
-      doc.setFontSize(10);
-      doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 14, 28);
-      doc.text(`Total Orders: ${filteredOrders.length}`, 14, 34);
-      doc.text(`Total Amount: ${formatCurrency(totalAmount)}`, 14, 40);
-
-      const tableData = filteredOrders.map(po => [
-        po.po_no || '-',
-        po.suppliers?.supplier_name || '-',
-        formatDate(po.po_date),
-        formatCurrency(po.total_amount),
-        po.status || 'Pending'
-      ]);
-
-      autoTable(doc, {
-        startY: 46,
-        head: [['PO #', 'Supplier', 'Date', 'Amount', 'Status']],
-        body: tableData,
-        theme: 'striped',
-        headStyles: { fillColor: [23, 23, 23] },
-        styles: { fontSize: 8 },
-        columnStyles: {
-          3: { halign: 'right' }
-        }
-      });
-
-      doc.save(`purchase-orders-${new Date().toISOString().split('T')[0]}.pdf`);
+      await generatePurchasesReportPDF(filteredOrders, totalAmount);
       setShowExportMenu(false);
       notify.success('PDF exported successfully!');
     } catch (error) {

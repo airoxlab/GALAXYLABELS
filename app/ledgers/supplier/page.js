@@ -100,6 +100,7 @@ export default function SupplierLedgerPage() {
     setLedgerLoading(true);
     try {
       // Fetch from supplier_ledger table
+      // Query in ascending order (oldest first) since we need to reverse for display
       let ledgerQuery = supabase
         .from('supplier_ledger')
         .select(`
@@ -112,10 +113,12 @@ export default function SupplierLedgerPage() {
           credit,
           balance,
           supplier_id,
+          created_at,
           suppliers(supplier_name)
         `)
         .eq('user_id', userId)
-        .order('transaction_date', { ascending: true });
+        .order('transaction_date', { ascending: true })
+        .order('created_at', { ascending: true });
 
       // Filter by specific supplier if selected
       if (supplierId !== 'all') {
@@ -139,14 +142,17 @@ export default function SupplierLedgerPage() {
         balance: parseFloat(entry.balance) || 0
       })) || [];
 
+      // Reverse to show newest first in the UI
+      ledgerEntries.reverse();
+
       // Calculate stats from ledger entries
       const totalCredit = ledgerEntries.reduce((sum, e) => sum + e.credit, 0);
       const totalDebit = ledgerEntries.reduce((sum, e) => sum + e.debit, 0);
       const outstandingBalance = totalCredit - totalDebit;
-      const purchaseEntries = ledgerEntries.filter(e => e.type.toLowerCase().includes('purchase'));
+      const purchaseEntries = ledgerEntries.filter(e => e.type.toLowerCase().includes('purchase') || e.type.toLowerCase().includes('po'));
 
       setSupplierStats({
-        totalPurchases: purchaseEntries.length,
+        totalPurchases: totalCredit,  // Total purchase amount
         totalPurchaseAmount: totalCredit,
         totalPayments: totalDebit,
         outstandingBalance
@@ -217,10 +223,22 @@ export default function SupplierLedgerPage() {
         ? suppliers.find(s => s.id.toString() === selectedSupplier)
         : { supplier_name: 'All Suppliers', mobile_no: '' };
 
+      // Recalculate stats from filtered ledger for PDF
+      const pdfTotalCredit = filteredLedger.reduce((sum, e) => sum + e.credit, 0);
+      const pdfTotalDebit = filteredLedger.reduce((sum, e) => sum + e.debit, 0);
+      const pdfOutstandingBalance = pdfTotalCredit - pdfTotalDebit;
+
+      const pdfStats = {
+        totalPurchases: pdfTotalCredit,
+        totalPurchaseAmount: pdfTotalCredit,
+        totalPayments: pdfTotalDebit,
+        outstandingBalance: pdfOutstandingBalance
+      };
+
       await downloadSupplierLedgerPDF(
         supplierData,
         filteredLedger,
-        supplierStats,
+        pdfStats,
         settings
       );
       notify.success('PDF downloaded successfully!');
@@ -348,57 +366,81 @@ export default function SupplierLedgerPage() {
         {/* Ledger Stats */}
         {supplierStats && (
           <div className="grid grid-cols-4 gap-3">
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl border border-blue-100 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Total Purchases</p>
-                  <p className="text-lg font-bold text-neutral-900">{supplierStats.totalPurchases}</p>
+                  <p className="text-xs text-blue-600 font-medium">Total Purchases</p>
+                  <p className="text-xl font-bold text-blue-900">{formatCurrency(supplierStats.totalPurchases)}</p>
                 </div>
-                <FileText className="w-5 h-5 text-neutral-400" />
+                <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className="bg-gradient-to-br from-violet-50 to-purple-100 rounded-xl border border-violet-100 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Total Amount</p>
-                  <p className="text-lg font-bold text-neutral-900">{formatCurrency(supplierStats.totalPurchaseAmount)}</p>
+                  <p className="text-xs text-violet-600 font-medium">Total Amount</p>
+                  <p className="text-xl font-bold text-violet-900">{formatCurrency(supplierStats.totalPurchaseAmount)}</p>
                 </div>
-                <TrendingDown className="w-5 h-5 text-neutral-400" />
+                <div className="w-10 h-10 rounded-lg bg-violet-500 flex items-center justify-center">
+                  <TrendingDown className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-xl border border-green-100 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Total Paid</p>
-                  <p className="text-lg font-bold text-green-600">{formatCurrency(supplierStats.totalPayments)}</p>
+                  <p className="text-xs text-green-600 font-medium">Total Paid</p>
+                  <p className="text-xl font-bold text-green-900">{formatCurrency(supplierStats.totalPayments)}</p>
                 </div>
-                <CheckCircle className="w-5 h-5 text-green-500" />
+                <div className="w-10 h-10 rounded-lg bg-green-500 flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-neutral-200 px-3 py-2">
+            <div className={cn(
+              "rounded-xl border px-4 py-3",
+              supplierStats.outstandingBalance > 0
+                ? "bg-gradient-to-br from-red-50 to-rose-100 border-red-100"
+                : "bg-gradient-to-br from-emerald-50 to-teal-100 border-emerald-100"
+            )}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-neutral-500">Payable</p>
                   <p className={cn(
-                    "text-lg font-bold",
-                    supplierStats.outstandingBalance > 0 ? "text-red-600" : "text-neutral-900"
+                    "text-xs font-medium",
+                    supplierStats.outstandingBalance > 0 ? "text-red-600" : "text-emerald-600"
+                  )}>Payable</p>
+                  <p className={cn(
+                    "text-xl font-bold",
+                    supplierStats.outstandingBalance > 0 ? "text-red-900" : "text-emerald-900"
                   )}>
                     {formatCurrency(supplierStats.outstandingBalance)}
                   </p>
                 </div>
-                <Clock className="w-5 h-5 text-red-500" />
+                <div className={cn(
+                  "w-10 h-10 rounded-lg flex items-center justify-center",
+                  supplierStats.outstandingBalance > 0 ? "bg-red-500" : "bg-emerald-500"
+                )}>
+                  <Clock className="w-5 h-5 text-white" />
+                </div>
               </div>
             </div>
           </div>
         )}
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-neutral-200 p-3">
+        <div className={cn(
+          "bg-white/80 backdrop-blur-xl rounded-xl p-3",
+          "border border-neutral-200/60",
+          "shadow-[0_2px_10px_rgba(0,0,0,0.03)]",
+          "relative z-50"
+        )}>
           <div className="flex items-center gap-2">
-            <div className="w-[250px]">
+            <div className="w-[250px] relative z-50">
               <SearchableDropdown
                 options={supplierOptions}
                 value={selectedSupplier}
@@ -489,7 +531,12 @@ export default function SupplierLedgerPage() {
         </div>
 
         {/* Ledger Table */}
-        <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+        <div className={cn(
+          "bg-white/80 backdrop-blur-xl rounded-xl",
+          "border border-neutral-200/60",
+          "shadow-[0_2px_10px_rgba(0,0,0,0.03)]",
+          "overflow-hidden"
+        )}>
           <div className="p-4 border-b border-neutral-200">
             <h2 className="text-sm font-semibold text-neutral-900">
               Ledger Report {selectedSupplier !== 'all' && supplierStats ? `- ${suppliers.find(s => s.id.toString() === selectedSupplier)?.supplier_name}` : '(All Suppliers)'}

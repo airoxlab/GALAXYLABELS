@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import ProductForm from './ProductForm';
 
-export default function ProductDrawer({ isOpen, onClose, product, categories, units, onSubmit, isLoading }) {
+export default function ProductDrawer({ isOpen, onClose, product, categories, units, onSubmit, isLoading, onAddCategory, onAddUnit, userId }) {
   // Close drawer on ESC key
   useEffect(() => {
     const handleEscape = (e) => {
@@ -88,6 +88,9 @@ export default function ProductDrawer({ isOpen, onClose, product, categories, un
                 onSubmit={onSubmit}
                 onCancel={onClose}
                 isLoading={isLoading}
+                onAddCategory={onAddCategory}
+                onAddUnit={onAddUnit}
+                userId={userId}
               />
             </div>
           </div>

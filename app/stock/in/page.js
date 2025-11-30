@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageSkeleton } from '@/components/ui/Skeleton';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
+import AddProductModal from '@/components/ui/AddProductModal';
+import AddSupplierModal from '@/components/ui/AddSupplierModal';
+import AddWarehouseModal from '@/components/ui/AddWarehouseModal';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -17,6 +20,13 @@ export default function StockInPage() {
   const [warehouses, setWarehouses] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [user, setUser] = useState(null);
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [addProductIndex, setAddProductIndex] = useState(null);
+  const [addProductInitialName, setAddProductInitialName] = useState('');
+  const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
+  const [addSupplierInitialName, setAddSupplierInitialName] = useState('');
+  const [showAddWarehouseModal, setShowAddWarehouseModal] = useState(false);
+  const [addWarehouseInitialName, setAddWarehouseInitialName] = useState('');
 
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -68,9 +78,10 @@ export default function StockInPage() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleProductChange = (index, productId) => {
+  const handleProductChange = (index, productId, productsArray = null) => {
     const newItems = [...formData.items];
-    const product = products.find(p => p.id === parseInt(productId));
+    const productsToUse = productsArray || products;
+    const product = productsToUse.find(p => p.id === parseInt(productId));
     if (product) {
       newItems[index] = {
         ...newItems[index],
@@ -120,61 +131,106 @@ export default function StockInPage() {
 
   const { total } = calculateTotals();
 
-  async function handleQuickAddSupplier(name) {
-    if (!name.trim() || !user) return;
+  const handleAddSupplierClick = (initialName = '') => {
+    setAddSupplierInitialName(initialName);
+    setShowAddSupplierModal(true);
+  };
+
+  const handleSupplierAdded = async (newSupplier) => {
+    const updatedSuppliers = await fetchSuppliers();
+    setFormData(prev => ({ ...prev, supplier_id: newSupplier.id.toString() }));
+    setAddSupplierInitialName('');
+  };
+
+  async function fetchSuppliers() {
     try {
       const { data, error } = await supabase
         .from('suppliers')
-        .insert([{ user_id: user.id, supplier_name: name.trim(), is_active: true, current_balance: 0 }])
-        .select()
-        .single();
+        .select('id, supplier_name')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .order('supplier_name');
 
       if (error) throw error;
-      setSuppliers(prev => [...prev, data].sort((a, b) => a.supplier_name.localeCompare(b.supplier_name)));
-      setFormData(prev => ({ ...prev, supplier_id: data.id.toString() }));
-      toast.success('Supplier added', {
-        duration: 1500,
-        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
-      });
+      setSuppliers(data || []);
+      return data || [];
     } catch (error) {
-      toast.error(error.message, {
-        duration: 2000,
-        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
-      });
+      console.error('Error fetching suppliers:', error);
+      return [];
     }
   }
 
-  async function handleQuickAddProduct(name, index) {
-    if (!name.trim() || !user) return;
+  const handleAddWarehouseClick = (initialName = '') => {
+    setAddWarehouseInitialName(initialName);
+    setShowAddWarehouseModal(true);
+  };
+
+  const handleWarehouseAdded = async (newWarehouse) => {
+    const updatedWarehouses = await fetchWarehouses();
+    setFormData(prev => ({ ...prev, warehouse_id: newWarehouse.id.toString() }));
+    setAddWarehouseInitialName('');
+  };
+
+  async function fetchWarehouses() {
+    try {
+      const { data, error } = await supabase
+        .from('warehouses')
+        .select('id, name')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+      setWarehouses(data || []);
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching warehouses:', error);
+      return [];
+    }
+  }
+
+  const handleAddProductClick = (index, initialName = '') => {
+    setAddProductIndex(index);
+    setAddProductInitialName(initialName);
+    setShowAddProductModal(true);
+  };
+
+  const handleProductAdded = async (newProduct) => {
+    const updatedProducts = await fetchProducts();
+
+    // Pass the fresh products array directly to handleProductChange
+    if (addProductIndex !== null) {
+      handleProductChange(addProductIndex, newProduct.id.toString(), updatedProducts);
+    }
+    setAddProductIndex(null);
+    setAddProductInitialName('');
+  };
+
+  async function fetchProducts() {
     try {
       const { data, error } = await supabase
         .from('products')
-        .insert([{ user_id: user.id, name: name.trim(), is_active: true, unit_price: 0, current_stock: 0 }])
-        .select('id, name, unit_price')
-        .single();
+        .select(`
+          id,
+          name,
+          unit_price,
+          current_stock,
+          category_id,
+          categories (
+            id,
+            name
+          )
+        `)
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .order('name');
 
       if (error) throw error;
-
-      setProducts(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
-
-      const newItems = [...formData.items];
-      newItems[index] = {
-        ...newItems[index],
-        product_id: data.id.toString(),
-        product_name: data.name,
-        unit_cost: data.unit_price || 0,
-      };
-      setFormData(prev => ({ ...prev, items: newItems }));
-
-      toast.success('Product added', {
-        duration: 1500,
-        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
-      });
+      setProducts(data || []);
+      return data || [];
     } catch (error) {
-      toast.error(error.message, {
-        duration: 2000,
-        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
-      });
+      console.error('Error fetching products:', error);
+      return [];
     }
   }
 
@@ -298,28 +354,21 @@ export default function StockInPage() {
                   value={formData.supplier_id}
                   onChange={(val) => setFormData(prev => ({ ...prev, supplier_id: val }))}
                   placeholder="Select Supplier"
-                  onQuickAdd={handleQuickAddSupplier}
-                  quickAddLabel="Add supplier"
+                  onOpenAddModal={(searchQuery) => handleAddSupplierClick(searchQuery)}
+                  addModalLabel="Add New Supplier"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1.5">Warehouse</label>
-                <select
-                  name="warehouse_id"
+                <SearchableDropdown
+                  label={<span className="text-sm font-medium text-neutral-700">Warehouse</span>}
+                  options={warehouseOptions}
                   value={formData.warehouse_id}
-                  onChange={handleChange}
-                  className={cn(
-                    "w-full px-3 py-2 text-sm",
-                    "bg-white border border-neutral-300 rounded-lg",
-                    "focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
-                  )}
-                >
-                  <option value="">Select Warehouse</option>
-                  {warehouses.map(w => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setFormData(prev => ({ ...prev, warehouse_id: val }))}
+                  placeholder="Select Warehouse"
+                  onOpenAddModal={(searchQuery) => handleAddWarehouseClick(searchQuery)}
+                  addModalLabel="Add New Warehouse"
+                />
               </div>
 
               <div>
@@ -383,8 +432,8 @@ export default function StockInPage() {
                             value={item.product_id}
                             onChange={(val) => handleProductChange(index, val)}
                             placeholder="Select Product"
-                            onQuickAdd={(name) => handleQuickAddProduct(name, index)}
-                            quickAddLabel="Add product"
+                            onOpenAddModal={(searchQuery) => handleAddProductClick(index, searchQuery)}
+                            addModalLabel="Add New Product"
                           />
                         </td>
                         <td className="px-2 py-2">
@@ -489,6 +538,43 @@ export default function StockInPage() {
           </div>
         </form>
       </div>
+
+      {/* Add Product Modal */}
+      <AddProductModal
+        isOpen={showAddProductModal}
+        onClose={() => {
+          setShowAddProductModal(false);
+          setAddProductIndex(null);
+          setAddProductInitialName('');
+        }}
+        onProductAdded={handleProductAdded}
+        userId={user?.id}
+        initialName={addProductInitialName}
+      />
+
+      {/* Add Supplier Modal */}
+      <AddSupplierModal
+        isOpen={showAddSupplierModal}
+        onClose={() => {
+          setShowAddSupplierModal(false);
+          setAddSupplierInitialName('');
+        }}
+        onSupplierAdded={handleSupplierAdded}
+        userId={user?.id}
+        initialName={addSupplierInitialName}
+      />
+
+      {/* Add Warehouse Modal */}
+      <AddWarehouseModal
+        isOpen={showAddWarehouseModal}
+        onClose={() => {
+          setShowAddWarehouseModal(false);
+          setAddWarehouseInitialName('');
+        }}
+        onWarehouseAdded={handleWarehouseAdded}
+        userId={user?.id}
+        initialName={addWarehouseInitialName}
+      />
     </DashboardLayout>
   );
 }

@@ -1,312 +1,266 @@
 -- =====================================================
--- HAMZA.SQL - Stock Management System Database Updates
--- Run this in Supabase SQL Editor
+-- Staff Management and Permissions System
+-- =====================================================
+-- This SQL file creates the necessary tables and triggers for managing
+-- staff users with granular permissions.
+--
+-- Superadmins (from users table) can create staff members and assign
+-- specific permissions to control what features they can access.
 -- =====================================================
 
--- 1. Add stock restriction setting to settings table
-ALTER TABLE public.settings
-ADD COLUMN IF NOT EXISTS restrict_negative_stock boolean DEFAULT false;
+-- =====================================================
+-- Staff Table
+-- =====================================================
+-- This table stores staff users who have limited access to the system
+-- Staff are different from superadmin users (stored in the users table)
 
--- Add comment for clarity
-COMMENT ON COLUMN public.settings.restrict_negative_stock IS 'If true, prevents transactions when insufficient stock';
+CREATE TABLE public.staff (
+  id SERIAL NOT NULL,
+  user_id INTEGER NOT NULL, -- References the superadmin who created this staff
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  phone VARCHAR(50) NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  other_details TEXT NULL,
+  notes TEXT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT staff_pkey PRIMARY KEY (id),
+  CONSTRAINT staff_email_key UNIQUE (email),
+  CONSTRAINT staff_user_id_fkey FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
 
--- 2. Add unit_cost to stock_in table for better tracking
-ALTER TABLE public.stock_in
-ADD COLUMN IF NOT EXISTS unit_cost numeric(15, 2) DEFAULT 0,
-ADD COLUMN IF NOT EXISTS total_cost numeric(15, 2) DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_staff_user_id ON public.staff USING btree (user_id) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_staff_email ON public.staff USING btree (email) TABLESPACE pg_default;
+CREATE INDEX IF NOT EXISTS idx_staff_is_active ON public.staff USING btree (is_active) TABLESPACE pg_default;
 
--- 3. Update stock_in table to include old and new stock values
-ALTER TABLE public.stock_in
-ADD COLUMN IF NOT EXISTS old_quantity numeric(15, 2) DEFAULT 0,
-ADD COLUMN IF NOT EXISTS new_quantity numeric(15, 2) DEFAULT 0;
+-- =====================================================
+-- Staff Permissions Table
+-- =====================================================
+-- This table stores granular permissions for each staff member
+-- Each permission controls access to specific features and actions
 
--- 4. Update stock_out table to include old and new stock values
-ALTER TABLE public.stock_out
-ADD COLUMN IF NOT EXISTS old_quantity numeric(15, 2) DEFAULT 0,
-ADD COLUMN IF NOT EXISTS new_quantity numeric(15, 2) DEFAULT 0;
+CREATE TABLE public.staff_permissions (
+  id SERIAL NOT NULL,
+  staff_id INTEGER NOT NULL,
 
--- 5. Add buying_source to stock_in if not exists
-ALTER TABLE public.stock_in
-ADD COLUMN IF NOT EXISTS buying_source character varying(50) DEFAULT 'Pakistan';
+  -- Sales Order Permissions (/sales/sale-order)
+  sales_order_view BOOLEAN DEFAULT FALSE,
+  sales_order_add BOOLEAN DEFAULT FALSE,
 
--- 5b. Add missing columns to stock_in table
-ALTER TABLE public.stock_in
-ADD COLUMN IF NOT EXISTS reference_type character varying(50) DEFAULT 'purchase',
-ADD COLUMN IF NOT EXISTS reference_no character varying(100),
-ADD COLUMN IF NOT EXISTS supplier_id integer,
-ADD COLUMN IF NOT EXISTS warehouse_id integer,
-ADD COLUMN IF NOT EXISTS notes text,
-ADD COLUMN IF NOT EXISTS created_by integer,
-ADD COLUMN IF NOT EXISTS date date DEFAULT CURRENT_DATE;
+  -- Sales Invoice Permissions (/sales)
+  sales_invoice_view BOOLEAN DEFAULT FALSE,
+  sales_invoice_edit BOOLEAN DEFAULT FALSE,
+  sales_invoice_delete BOOLEAN DEFAULT FALSE,
 
--- 5c. Add missing columns to stock_out table
-ALTER TABLE public.stock_out
-ADD COLUMN IF NOT EXISTS reference_type character varying(50) DEFAULT 'sale',
-ADD COLUMN IF NOT EXISTS reference_no character varying(100),
-ADD COLUMN IF NOT EXISTS customer_id integer,
-ADD COLUMN IF NOT EXISTS warehouse_id integer,
-ADD COLUMN IF NOT EXISTS notes text,
-ADD COLUMN IF NOT EXISTS created_by integer,
-ADD COLUMN IF NOT EXISTS date date DEFAULT CURRENT_DATE;
+  -- Purchase Order Permissions (/purchases/purchase-order)
+  purchase_order_view BOOLEAN DEFAULT FALSE,
+  purchase_order_add BOOLEAN DEFAULT FALSE,
 
--- 6. Create index for faster stock queries
-CREATE INDEX IF NOT EXISTS idx_stock_in_product_id ON public.stock_in USING btree (product_id);
-CREATE INDEX IF NOT EXISTS idx_stock_out_product_id ON public.stock_out USING btree (product_id);
-CREATE INDEX IF NOT EXISTS idx_stock_in_created_at ON public.stock_in USING btree (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_stock_out_created_at ON public.stock_out USING btree (created_at DESC);
+  -- Purchase Permissions (/purchases)
+  purchase_view BOOLEAN DEFAULT FALSE,
+  purchase_edit BOOLEAN DEFAULT FALSE,
+  purchase_delete BOOLEAN DEFAULT FALSE,
 
--- 7. Create a view for current stock by product (calculated from stock_in and stock_out)
-CREATE OR REPLACE VIEW public.product_stock_summary AS
-SELECT
-    p.id as product_id,
-    p.user_id,
-    p.name as product_name,
-    p.current_stock,
-    p.unit_price,
-    u.symbol as unit_symbol,
-    c.name as category_name,
-    COALESCE(si.total_in, 0) as total_stock_in,
-    COALESCE(so.total_out, 0) as total_stock_out,
-    COALESCE(si.total_in, 0) - COALESCE(so.total_out, 0) as calculated_stock
-FROM products p
-LEFT JOIN units u ON p.unit_id = u.id
-LEFT JOIN categories c ON p.category_id = c.id
-LEFT JOIN (
-    SELECT product_id, SUM(quantity) as total_in
-    FROM stock_in
-    GROUP BY product_id
-) si ON p.id = si.product_id
-LEFT JOIN (
-    SELECT product_id, SUM(quantity) as total_out
-    FROM stock_out
-    GROUP BY product_id
-) so ON p.id = so.product_id
-WHERE p.is_active = true;
+  -- Product Permissions (/products)
+  products_view BOOLEAN DEFAULT FALSE,
+  products_add BOOLEAN DEFAULT FALSE,
+  products_edit BOOLEAN DEFAULT FALSE,
+  products_delete BOOLEAN DEFAULT FALSE,
 
--- 8. Create function to update product stock after stock_in
-CREATE OR REPLACE FUNCTION update_product_stock_on_stock_in()
+  -- Customer Permissions (/customers)
+  customers_view BOOLEAN DEFAULT FALSE,
+  customers_add BOOLEAN DEFAULT FALSE,
+  customers_edit BOOLEAN DEFAULT FALSE,
+  customers_delete BOOLEAN DEFAULT FALSE,
+
+  -- Supplier Permissions (/suppliers)
+  suppliers_view BOOLEAN DEFAULT FALSE,
+  suppliers_add BOOLEAN DEFAULT FALSE,
+  suppliers_edit BOOLEAN DEFAULT FALSE,
+  suppliers_delete BOOLEAN DEFAULT FALSE,
+
+  -- Stock In Permissions (/stock/in)
+  stock_in_view BOOLEAN DEFAULT FALSE,
+  stock_in_add BOOLEAN DEFAULT FALSE,
+
+  -- Stock Out Permissions (/stock/out)
+  stock_out_view BOOLEAN DEFAULT FALSE,
+  stock_out_add BOOLEAN DEFAULT FALSE,
+
+  -- Stock Availability Permissions (/stock/availability)
+  stock_availability_view BOOLEAN DEFAULT FALSE,
+  stock_availability_stock_in BOOLEAN DEFAULT FALSE,
+
+  -- Low Stock Permissions (/stock/low-stock)
+  low_stock_view BOOLEAN DEFAULT FALSE,
+  low_stock_restock BOOLEAN DEFAULT FALSE,
+
+  -- Warehouse Permissions (/warehouses)
+  warehouses_view BOOLEAN DEFAULT FALSE,
+  warehouses_add BOOLEAN DEFAULT FALSE,
+  warehouses_edit BOOLEAN DEFAULT FALSE,
+  warehouses_delete BOOLEAN DEFAULT FALSE,
+
+  -- Payment In Permissions (/payments/in)
+  payment_in_view BOOLEAN DEFAULT FALSE,
+  payment_in_add BOOLEAN DEFAULT FALSE,
+
+  -- Payment Out Permissions (/payments/out)
+  payment_out_view BOOLEAN DEFAULT FALSE,
+  payment_out_add BOOLEAN DEFAULT FALSE,
+
+  -- Payment History Permissions (/payments/history)
+  payment_history_view BOOLEAN DEFAULT FALSE,
+  payment_history_edit BOOLEAN DEFAULT FALSE,
+  payment_history_delete BOOLEAN DEFAULT FALSE,
+
+  -- Customer Ledger Permissions (/ledgers/customer)
+  customer_ledger_view BOOLEAN DEFAULT FALSE,
+
+  -- Supplier Ledger Permissions (/ledgers/supplier)
+  supplier_ledger_view BOOLEAN DEFAULT FALSE,
+
+  -- Expense Permissions (/expenses)
+  expenses_view BOOLEAN DEFAULT FALSE,
+  expenses_add BOOLEAN DEFAULT FALSE,
+  expenses_edit BOOLEAN DEFAULT FALSE,
+  expenses_delete BOOLEAN DEFAULT FALSE,
+
+  -- Reports Permissions (/reports)
+  reports_view BOOLEAN DEFAULT FALSE,
+  reports_download BOOLEAN DEFAULT FALSE,
+
+  -- Settings Permissions (/settings)
+  settings_view BOOLEAN DEFAULT FALSE,
+  settings_edit BOOLEAN DEFAULT FALSE,
+
+  created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT staff_permissions_pkey PRIMARY KEY (id),
+  CONSTRAINT staff_permissions_staff_id_key UNIQUE (staff_id),
+  CONSTRAINT staff_permissions_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES staff (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE INDEX IF NOT EXISTS idx_staff_permissions_staff_id ON public.staff_permissions USING btree (staff_id) TABLESPACE pg_default;
+
+-- =====================================================
+-- Trigger Functions
+-- =====================================================
+
+-- Function to update updated_at timestamp for staff table
+CREATE OR REPLACE FUNCTION update_staff_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Get current stock
-    SELECT current_stock INTO NEW.old_quantity
-    FROM products
-    WHERE id = NEW.product_id;
-
-    -- Calculate new stock
-    NEW.new_quantity := COALESCE(NEW.old_quantity, 0) + NEW.quantity;
-
-    -- Update product current_stock
-    UPDATE products
-    SET current_stock = NEW.new_quantity,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.product_id;
-
-    -- Insert into product_history
-    INSERT INTO product_history (
-        user_id,
-        product_id,
-        action_type,
-        reference_type,
-        reference_id,
-        reference_no,
-        quantity_change,
-        old_stock,
-        new_stock,
-        unit_price,
-        total_amount,
-        supplier_id,
-        warehouse_id,
-        notes,
-        created_by,
-        created_at
-    ) VALUES (
-        NEW.user_id,
-        NEW.product_id,
-        'stock_in',
-        NEW.reference_type,
-        NEW.id,
-        NEW.reference_no,
-        NEW.quantity,
-        NEW.old_quantity,
-        NEW.new_quantity,
-        NEW.unit_cost,
-        NEW.total_cost,
-        NEW.supplier_id,
-        NEW.warehouse_id,
-        NEW.notes,
-        NEW.created_by,
-        CURRENT_TIMESTAMP
-    );
-
-    RETURN NEW;
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- 9. Create trigger for stock_in
-DROP TRIGGER IF EXISTS trigger_update_stock_on_stock_in ON public.stock_in;
-CREATE TRIGGER trigger_update_stock_on_stock_in
-    BEFORE INSERT ON public.stock_in
-    FOR EACH ROW
-    EXECUTE FUNCTION update_product_stock_on_stock_in();
+-- Trigger for staff table
+DROP TRIGGER IF EXISTS update_staff_timestamp ON staff;
+CREATE TRIGGER update_staff_timestamp
+BEFORE UPDATE ON staff
+FOR EACH ROW
+EXECUTE FUNCTION update_staff_updated_at();
 
--- 10. Create function to update product stock after stock_out
-CREATE OR REPLACE FUNCTION update_product_stock_on_stock_out()
+-- Function to update updated_at timestamp for staff_permissions table
+CREATE OR REPLACE FUNCTION update_staff_permissions_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Get current stock
-    SELECT current_stock INTO NEW.old_quantity
-    FROM products
-    WHERE id = NEW.product_id;
-
-    -- Calculate new stock
-    NEW.new_quantity := COALESCE(NEW.old_quantity, 0) - NEW.quantity;
-
-    -- Update product current_stock
-    UPDATE products
-    SET current_stock = NEW.new_quantity,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.product_id;
-
-    -- Insert into product_history
-    INSERT INTO product_history (
-        user_id,
-        product_id,
-        action_type,
-        reference_type,
-        reference_id,
-        reference_no,
-        quantity_change,
-        old_stock,
-        new_stock,
-        customer_id,
-        warehouse_id,
-        notes,
-        created_by,
-        created_at
-    ) VALUES (
-        NEW.user_id,
-        NEW.product_id,
-        'stock_out',
-        NEW.reference_type,
-        NEW.id,
-        NEW.reference_no,
-        -NEW.quantity,
-        NEW.old_quantity,
-        NEW.new_quantity,
-        NEW.customer_id,
-        NEW.warehouse_id,
-        NEW.notes,
-        NEW.created_by,
-        CURRENT_TIMESTAMP
-    );
-
-    RETURN NEW;
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- 11. Create trigger for stock_out
-DROP TRIGGER IF EXISTS trigger_update_stock_on_stock_out ON public.stock_out;
-CREATE TRIGGER trigger_update_stock_on_stock_out
-    BEFORE INSERT ON public.stock_out
-    FOR EACH ROW
-    EXECUTE FUNCTION update_product_stock_on_stock_out();
+-- Trigger for staff_permissions table
+DROP TRIGGER IF EXISTS update_staff_permissions_timestamp ON staff_permissions;
+CREATE TRIGGER update_staff_permissions_timestamp
+BEFORE UPDATE ON staff_permissions
+FOR EACH ROW
+EXECUTE FUNCTION update_staff_permissions_updated_at();
 
--- 12. Add low_stock_threshold to products table
-ALTER TABLE public.products
-ADD COLUMN IF NOT EXISTS low_stock_threshold numeric(15, 2) DEFAULT 10;
+-- Function to automatically create permissions record when staff is created
+CREATE OR REPLACE FUNCTION create_staff_permissions()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO staff_permissions (staff_id)
+  VALUES (NEW.id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
--- 13. Create view for low stock products
-CREATE OR REPLACE VIEW public.low_stock_products AS
-SELECT
-    p.id,
-    p.user_id,
-    p.name,
-    p.current_stock,
-    p.low_stock_threshold,
-    p.unit_price,
-    u.symbol as unit_symbol,
-    c.name as category_name
-FROM products p
-LEFT JOIN units u ON p.unit_id = u.id
-LEFT JOIN categories c ON p.category_id = c.id
-WHERE p.is_active = true
-AND p.current_stock < p.low_stock_threshold;
-
--- 14. Create comprehensive stock transactions view
-CREATE OR REPLACE VIEW public.stock_transactions AS
-SELECT
-    'in' as transaction_type,
-    si.id,
-    si.user_id,
-    si.product_id,
-    p.name as product_name,
-    si.quantity,
-    si.unit_cost,
-    si.total_cost,
-    si.old_quantity as old_stock,
-    si.new_quantity as new_stock,
-    si.reference_type,
-    si.reference_no,
-    si.warehouse_id,
-    w.name as warehouse_name,
-    si.supplier_id,
-    s.supplier_name,
-    NULL as customer_id,
-    NULL as customer_name,
-    si.notes,
-    si.created_at,
-    si.created_by
-FROM stock_in si
-LEFT JOIN products p ON si.product_id = p.id
-LEFT JOIN warehouses w ON si.warehouse_id = w.id
-LEFT JOIN suppliers s ON si.supplier_id = s.id
-
-UNION ALL
-
-SELECT
-    'out' as transaction_type,
-    so.id,
-    so.user_id,
-    so.product_id,
-    p.name as product_name,
-    so.quantity,
-    0 as unit_cost,
-    0 as total_cost,
-    so.old_quantity as old_stock,
-    so.new_quantity as new_stock,
-    so.reference_type,
-    so.reference_no,
-    so.warehouse_id,
-    w.name as warehouse_name,
-    NULL as supplier_id,
-    NULL as supplier_name,
-    so.customer_id,
-    c.customer_name,
-    so.notes,
-    so.created_at,
-    so.created_by
-FROM stock_out so
-LEFT JOIN products p ON so.product_id = p.id
-LEFT JOIN warehouses w ON so.warehouse_id = w.id
-LEFT JOIN customers c ON so.customer_id = c.id
-ORDER BY created_at DESC;
-
--- 15. Grant permissions on views
-GRANT SELECT ON public.product_stock_summary TO authenticated;
-GRANT SELECT ON public.low_stock_products TO authenticated;
-GRANT SELECT ON public.stock_transactions TO authenticated;
-
--- 16. Update existing products to have default low_stock_threshold if NULL
-UPDATE public.products
-SET low_stock_threshold = 10
-WHERE low_stock_threshold IS NULL;
+-- Trigger to automatically create permissions when staff is created
+DROP TRIGGER IF EXISTS create_staff_permissions_trigger ON staff;
+CREATE TRIGGER create_staff_permissions_trigger
+AFTER INSERT ON staff
+FOR EACH ROW
+EXECUTE FUNCTION create_staff_permissions();
 
 -- =====================================================
--- DONE!
--- The following features are now supported:
--- 1. Automatic stock updates when stock_in/stock_out is recorded
--- 2. Product history tracking for all stock movements
--- 3. Low stock threshold per product
--- 4. Stock restriction setting (restrict_negative_stock)
--- 5. Views for stock summary, low stock, and transactions
+-- Comments for Documentation
+-- =====================================================
+
+COMMENT ON TABLE staff IS 'Stores staff users with limited permissions, managed by superadmin users';
+COMMENT ON TABLE staff_permissions IS 'Stores granular permissions for each staff member to control access to features';
+
+COMMENT ON COLUMN staff.user_id IS 'References the superadmin (from users table) who created this staff member';
+COMMENT ON COLUMN staff.password_hash IS 'Bcrypt hashed password for staff authentication';
+COMMENT ON COLUMN staff.is_active IS 'Whether the staff account is active and can login';
+
+COMMENT ON COLUMN staff_permissions.sales_order_view IS 'Permission to view sales order page (/sales/sale-order)';
+COMMENT ON COLUMN staff_permissions.sales_order_add IS 'Permission to add new sales orders';
+COMMENT ON COLUMN staff_permissions.sales_invoice_view IS 'Permission to view sales invoices page (/sales)';
+COMMENT ON COLUMN staff_permissions.sales_invoice_edit IS 'Permission to edit sales invoices';
+COMMENT ON COLUMN staff_permissions.sales_invoice_delete IS 'Permission to delete sales invoices';
+COMMENT ON COLUMN staff_permissions.purchase_order_view IS 'Permission to view purchase order page (/purchases/purchase-order)';
+COMMENT ON COLUMN staff_permissions.purchase_order_add IS 'Permission to add new purchase orders';
+COMMENT ON COLUMN staff_permissions.purchase_view IS 'Permission to view purchases page (/purchases)';
+COMMENT ON COLUMN staff_permissions.purchase_edit IS 'Permission to edit purchases';
+COMMENT ON COLUMN staff_permissions.purchase_delete IS 'Permission to delete purchases';
+COMMENT ON COLUMN staff_permissions.products_view IS 'Permission to view products page (/products)';
+COMMENT ON COLUMN staff_permissions.products_add IS 'Permission to add new products';
+COMMENT ON COLUMN staff_permissions.products_edit IS 'Permission to edit products';
+COMMENT ON COLUMN staff_permissions.products_delete IS 'Permission to delete products';
+COMMENT ON COLUMN staff_permissions.customers_view IS 'Permission to view customers page (/customers)';
+COMMENT ON COLUMN staff_permissions.customers_add IS 'Permission to add new customers';
+COMMENT ON COLUMN staff_permissions.customers_edit IS 'Permission to edit customers';
+COMMENT ON COLUMN staff_permissions.customers_delete IS 'Permission to delete customers';
+COMMENT ON COLUMN staff_permissions.suppliers_view IS 'Permission to view suppliers page (/suppliers)';
+COMMENT ON COLUMN staff_permissions.suppliers_add IS 'Permission to add new suppliers';
+COMMENT ON COLUMN staff_permissions.suppliers_edit IS 'Permission to edit suppliers';
+COMMENT ON COLUMN staff_permissions.suppliers_delete IS 'Permission to delete suppliers';
+COMMENT ON COLUMN staff_permissions.stock_in_view IS 'Permission to view stock in page (/stock/in)';
+COMMENT ON COLUMN staff_permissions.stock_in_add IS 'Permission to add stock in';
+COMMENT ON COLUMN staff_permissions.stock_out_view IS 'Permission to view stock out page (/stock/out)';
+COMMENT ON COLUMN staff_permissions.stock_out_add IS 'Permission to add stock out';
+COMMENT ON COLUMN staff_permissions.stock_availability_view IS 'Permission to view stock availability page (/stock/availability)';
+COMMENT ON COLUMN staff_permissions.stock_availability_stock_in IS 'Permission to stock in from availability page';
+COMMENT ON COLUMN staff_permissions.low_stock_view IS 'Permission to view low stock page (/stock/low-stock)';
+COMMENT ON COLUMN staff_permissions.low_stock_restock IS 'Permission to restock from low stock page';
+COMMENT ON COLUMN staff_permissions.warehouses_view IS 'Permission to view warehouses page (/warehouses)';
+COMMENT ON COLUMN staff_permissions.warehouses_add IS 'Permission to add warehouses';
+COMMENT ON COLUMN staff_permissions.warehouses_edit IS 'Permission to edit warehouses';
+COMMENT ON COLUMN staff_permissions.warehouses_delete IS 'Permission to delete warehouses';
+COMMENT ON COLUMN staff_permissions.payment_in_view IS 'Permission to view payment in page (/payments/in)';
+COMMENT ON COLUMN staff_permissions.payment_in_add IS 'Permission to add payment in';
+COMMENT ON COLUMN staff_permissions.payment_out_view IS 'Permission to view payment out page (/payments/out)';
+COMMENT ON COLUMN staff_permissions.payment_out_add IS 'Permission to add payment out';
+COMMENT ON COLUMN staff_permissions.payment_history_view IS 'Permission to view payment history page (/payments/history)';
+COMMENT ON COLUMN staff_permissions.payment_history_edit IS 'Permission to edit payment history';
+COMMENT ON COLUMN staff_permissions.payment_history_delete IS 'Permission to delete payment history';
+COMMENT ON COLUMN staff_permissions.customer_ledger_view IS 'Permission to view customer ledger page (/ledgers/customer)';
+COMMENT ON COLUMN staff_permissions.supplier_ledger_view IS 'Permission to view supplier ledger page (/ledgers/supplier)';
+COMMENT ON COLUMN staff_permissions.expenses_view IS 'Permission to view expenses page (/expenses)';
+COMMENT ON COLUMN staff_permissions.expenses_add IS 'Permission to add expenses';
+COMMENT ON COLUMN staff_permissions.expenses_edit IS 'Permission to edit expenses';
+COMMENT ON COLUMN staff_permissions.expenses_delete IS 'Permission to delete expenses';
+COMMENT ON COLUMN staff_permissions.reports_view IS 'Permission to view reports page (/reports)';
+COMMENT ON COLUMN staff_permissions.reports_download IS 'Permission to download reports';
+COMMENT ON COLUMN staff_permissions.settings_view IS 'Permission to view settings page (/settings)';
+COMMENT ON COLUMN staff_permissions.settings_edit IS 'Permission to edit settings';
+
+-- =====================================================
+-- End of SQL File
 -- =====================================================

@@ -198,7 +198,7 @@ export default function StockAvailabilityPage() {
     }
   };
 
-  // Export to PDF
+  // Export to PDF with professional design matching Sale Order PDF
   const exportToPDF = async () => {
     try {
       if (filteredProducts.length === 0) {
@@ -209,202 +209,349 @@ export default function StockAvailabilityPage() {
         return;
       }
 
+      // Helper to load image as base64 with compression
+      const getImageAsBase64 = async (url, maxWidth = 150, quality = 0.8) => {
+        if (!url) return null;
+        try {
+          const response = await fetch(url);
+          const blob = await response.blob();
+          return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              let width = img.width;
+              let height = img.height;
+              if (width > maxWidth) {
+                height = (height * maxWidth) / width;
+                width = maxWidth;
+              }
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.onerror = reject;
+            img.src = URL.createObjectURL(blob);
+          });
+        } catch (error) {
+          console.error('Error loading image:', error);
+          return null;
+        }
+      };
+
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 14;
 
-      // Colors
-      const primaryColor = [23, 23, 23];
-      const grayColor = [115, 115, 115];
-
-      let yPos = 15;
-
-      // Header with Logo
+      // Load images with compression
+      const images = {};
       if (settings?.logo_url) {
+        images.logo = await getImageAsBase64(settings.logo_url, 200, 0.9);
+      }
+      if (settings?.qr_code_url) {
+        images.qr = await getImageAsBase64(settings.qr_code_url, 150, 0.9);
+      }
+
+      // Calculate totals
+      const totalValue = totalStockValue;
+      const totalStock = filteredProducts.reduce((sum, p) => sum + (p.current_stock || 0), 0);
+
+      // Prepare data with category in product name
+      const productsData = filteredProducts.map((prod, idx) => ({
+        idx: idx + 1,
+        productName: prod.name || '-',
+        category: prod.categories?.name || '',
+        stock: prod.current_stock || 0,
+        minStock: prod.low_stock_threshold || 10,
+        unitPrice: prod.unit_price || 0,
+        value: (prod.current_stock || 0) * (prod.unit_price || 0)
+      }));
+
+      // Format currency
+      const formatCurrency = (value) => {
+        return `Rs ${value.toLocaleString('en-PK', { maximumFractionDigits: 0 })}`;
+      };
+
+      // Header
+      let y = 14;
+      const centerX = pageWidth / 2;
+
+      // Logo (left aligned)
+      if (images.logo) {
         try {
-          const response = await fetch(settings.logo_url);
-          const blob = await response.blob();
-          const reader = new FileReader();
-          const base64 = await new Promise((resolve, reject) => {
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          doc.addImage(base64, 'PNG', margin, yPos, 25, 25);
+          doc.addImage(images.logo, 'JPEG', margin, y, 30, 30);
         } catch (error) {
-          console.error('Error loading logo:', error);
+          console.error('Error adding logo:', error);
         }
       }
 
-      // Company Name and Details
-      const companyX = settings?.logo_url ? margin + 30 : margin;
-
-      doc.setFontSize(18);
+      // Company details (centered)
+      const companyY = y + 8;
+      doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...primaryColor);
-      doc.text(settings?.company_name || 'COMPANY NAME', companyX, yPos + 8);
+      doc.setTextColor(0, 0, 0);
+      doc.text(settings?.company_name || 'COMPANY NAME', centerX, companyY, { align: 'center' });
 
-      doc.setFontSize(8);
+      doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...grayColor);
+      doc.setTextColor(80, 80, 80);
 
-      let detailY = yPos + 14;
+      let contactY = companyY + 7;
       if (settings?.company_address) {
-        doc.text(settings.company_address, companyX, detailY);
-        detailY += 4;
-      }
-      if (settings?.contact_detail_1) {
-        doc.text(`Phone: ${settings.contact_detail_1}`, companyX, detailY);
-        detailY += 4;
-      }
-      if (settings?.email_1) {
-        doc.text(`Email: ${settings.email_1}`, companyX, detailY);
-        detailY += 4;
-      }
-      if (settings?.ntn) {
-        doc.text(`NTN: ${settings.ntn}`, companyX, detailY);
+        doc.text(settings.company_address, centerX, contactY, { align: 'center' });
+        contactY += 5;
       }
 
-      yPos += 40;
+      const contact = [
+        settings?.contact_detail_1 ? `Contact # ${settings.contact_detail_1}` : null,
+        settings?.email_1 ? `Email: ${settings.email_1}` : null
+      ].filter(Boolean).join(' | ');
+      if (contact) {
+        doc.text(contact, centerX, contactY, { align: 'center' });
+        contactY += 5;
+      }
 
-      // Divider line
-      doc.setDrawColor(200, 200, 200);
-      doc.setLineWidth(0.5);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
+      const tax = [
+        settings?.ntn ? `NTN # ${settings.ntn}` : null,
+        settings?.str ? `STR # ${settings.str}` : null
+      ].filter(Boolean).join('   ');
+      if (tax) {
+        doc.text(tax, centerX, contactY, { align: 'center' });
+      }
 
-      yPos += 8;
+      // QR Code (right aligned)
+      if (images.qr) {
+        try {
+          doc.addImage(images.qr, 'JPEG', pageWidth - margin - 30, y, 30, 30);
+        } catch (error) {
+          console.error('Error adding QR code:', error);
+        }
+      }
 
-      // Report Title
+      y += 45;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.4);
+      doc.line(centerX - 40, y, centerX + 40, y);
+      y += 6;
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...primaryColor);
-      doc.text('STOCK AVAILABILITY REPORT', pageWidth / 2, yPos, { align: 'center' });
+      doc.setTextColor(0, 0, 0);
+      doc.text('STOCK AVAILABILITY REPORT', centerX, y, { align: 'center' });
+      y += 4;
+      doc.setDrawColor(0, 0, 0);
+      doc.line(centerX - 42, y, centerX + 42, y);
+      y += 10;
 
-      yPos += 8;
-
-      // Another divider
-      doc.line(margin + 50, yPos, pageWidth - margin - 50, yPos);
-
-      yPos += 10;
-
-      // Summary Info
-      doc.setFontSize(9);
-      doc.setTextColor(...primaryColor);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text('Date:', margin, yPos);
+      // Date info
+      doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text(new Date().toLocaleDateString('en-GB'), margin + 20, yPos);
+      doc.setTextColor(80, 80, 80);
+      doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, centerX, y, { align: 'center' });
+      y += 10;
 
-      doc.setFont('helvetica', 'bold');
-      doc.text('Total Products:', margin, yPos + 5);
+      // Summary section
+      doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text(`${filteredProducts.length}`, margin + 32, yPos + 5);
+      doc.setTextColor(0, 0, 0);
 
-      // Right side summary
-      const rightCol = pageWidth - margin - 50;
+      const leftX = margin;
+      const rightX = pageWidth - margin;
+
       doc.setFont('helvetica', 'bold');
-      doc.text('Stock Value:', rightCol, yPos);
+      doc.text('Date:', leftX, y);
       doc.setFont('helvetica', 'normal');
-      doc.text(`Rs ${totalStockValue.toLocaleString('en-PK', { maximumFractionDigits: 0 })}`, rightCol + 28, yPos);
+      doc.text(new Date().toLocaleDateString('en-GB'), leftX + 15, y);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Low Stock:', rightCol, yPos + 5);
+      doc.text('Stock Value:', rightX - 60, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(formatCurrency(totalValue), rightX, y, { align: 'right' });
+
+      y += 6;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Total Products:', leftX, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${filteredProducts.length}`, leftX + 32, y);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Low Stock:', rightX - 60, y);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(202, 138, 4);
-      doc.text(`${lowStockCount}`, rightCol + 28, yPos + 5);
+      doc.text(`${lowStockCount}`, rightX, y, { align: 'right' });
 
-      doc.setTextColor(...primaryColor);
+      y += 6;
+      doc.setTextColor(0, 0, 0);
       doc.setFont('helvetica', 'bold');
-      doc.text('Out of Stock:', rightCol, yPos + 10);
+      doc.text('Out of Stock:', rightX - 60, y);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(220, 38, 38);
-      doc.text(`${outOfStockCount}`, rightCol + 28, yPos + 10);
+      doc.text(`${outOfStockCount}`, rightX, y, { align: 'right' });
 
-      yPos += 20;
+      y += 10;
 
-      // Items Table
-      const tableData = filteredProducts.map((product, index) => [
-        index + 1,
-        product.name,
-        product.categories?.name || '-',
-        `${product.current_stock || 0}`,
-        `Rs ${(product.unit_price || 0).toLocaleString()}`,
-        `Rs ${((product.current_stock || 0) * (product.unit_price || 0)).toLocaleString()}`,
-        getStockStatus(product).label
+      // Simple table body (empty strings for custom-rendered columns)
+      const simpleTableBody = productsData.map((prod) => [
+        String(prod.idx),
+        '',  // Product name will be custom rendered
+        String(prod.stock),
+        prod.unitPrice.toFixed(2),
+        formatCurrency(prod.value)
       ]);
 
       autoTable(doc, {
-        startY: yPos,
-        head: [['#', 'Product', 'Category', 'Stock', 'Unit Price', 'Value', 'Status']],
-        body: tableData,
-        theme: 'grid',
+        startY: y,
+        head: [['S.N', 'Product Name', 'Current Stock', 'Unit Price', 'Stock Value']],
+        body: simpleTableBody,
+        foot: [['TOTAL', '', String(totalStock), '', formatCurrency(totalValue)]],
+        theme: 'plain',
         headStyles: {
-          fillColor: primaryColor,
-          textColor: 255,
+          fillColor: [255, 255, 255],
+          textColor: [0, 0, 0],
           fontStyle: 'bold',
-          fontSize: 9,
+          fontSize: 11,
           halign: 'center',
-          cellPadding: 4
+          valign: 'middle',
+          lineWidth: 0,
+          cellPadding: { top: 4, right: 1, bottom: 7, left: 1 },
         },
         bodyStyles: {
-          fontSize: 9,
-          cellPadding: 5,
-          minCellHeight: 10
+          fontSize: 11,
+          textColor: [0, 0, 0],
+          halign: 'center',
+          valign: 'top',
+          lineWidth: 0,
+          lineColor: [255, 255, 255],
+          minCellHeight: 14,
+          cellPadding: { top: 4, right: 1, bottom: 3, left: 1 },
+        },
+        footStyles: {
+          fillColor: [255, 255, 255],
+          textColor: [0, 0, 0],
+          fontStyle: 'bold',
+          fontSize: 11,
+          halign: 'center',
+          valign: 'middle',
+          lineWidth: 0,
+          cellPadding: { top: 7, right: 1, bottom: 2, left: 1 },
         },
         columnStyles: {
-          0: { cellWidth: 12, halign: 'center' },
-          1: { cellWidth: 'auto' },
-          2: { cellWidth: 25 },
-          3: { cellWidth: 20, halign: 'right' },
-          4: { cellWidth: 28, halign: 'right' },
-          5: { cellWidth: 30, halign: 'right' },
-          6: { cellWidth: 18, halign: 'center' }
+          0: { halign: 'center', cellWidth: 18 },
+          1: { halign: 'center', cellWidth: 77 },
+          2: { halign: 'center', cellWidth: 33 },
+          3: { halign: 'center', cellWidth: 33 },
+          4: { halign: 'center', cellWidth: 34 },
         },
-        styles: {
-          lineColor: [200, 200, 200],
-          lineWidth: 0.1,
+        tableWidth: 195,
+        styles: { overflow: 'linebreak', cellPadding: 2 },
+        margin: { left: (pageWidth - 195) / 2, right: (pageWidth - 195) / 2, bottom: 30 },
+        showHead: 'everyPage',
+        showFoot: 'lastPage',
+        willDrawPage: function (data) {
+          if (data.pageNumber > 1) {
+            const topY = 10;
+            const lineY = topY + 6;
+
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(80, 80, 80);
+
+            doc.text('Stock Availability Report', margin, topY);
+            doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, pageWidth - margin, topY, { align: 'right' });
+
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.3);
+            doc.line(margin, lineY, pageWidth - margin, lineY);
+
+            data.settings.startY = lineY + 8;
+          }
         },
-        margin: { left: margin, right: margin },
-        didDrawCell: (data) => {
-          if (data.column.index === 6 && data.cell.section === 'body') {
-            const status = data.cell.raw;
-            if (status === 'Out') {
-              doc.setTextColor(220, 38, 38);
-            } else if (status === 'Low') {
-              doc.setTextColor(202, 138, 4);
-            } else {
-              doc.setTextColor(22, 163, 74);
+        didDrawPage: function(data) {
+          // Draw border around header row with column separators
+          const headerRow = data.table.head[0];
+          if (headerRow && headerRow.cells[0]) {
+            const startX = headerRow.cells[0].x;
+            const startY = headerRow.cells[0].y;
+            const tableWidth = 195;
+            const borderHeight = headerRow.height - 3;
+
+            if (startY >= 10) {
+              doc.setDrawColor(0, 0, 0);
+              doc.setLineWidth(0.3);
+
+              doc.rect(startX, startY, tableWidth, borderHeight);
+
+              let currentX = startX;
+              const cells = headerRow.cells;
+              Object.keys(cells).forEach((key, i) => {
+                if (i < Object.keys(cells).length - 1) {
+                  currentX += cells[key].width;
+                  doc.line(currentX, startY, currentX, startY + borderHeight);
+                }
+              });
             }
+          }
+
+          // Draw border around footer row (only top and bottom lines)
+          const footerRow = data.table.foot[0];
+          if (footerRow && footerRow.cells[0]) {
+            const startX = footerRow.cells[0].x;
+            const startY = footerRow.cells[0].y;
+            const tableWidth = 195;
+            const footerHeight = footerRow.height;
+
+            if (startY >= 10) {
+              doc.setDrawColor(0, 0, 0);
+              doc.setLineWidth(0.3);
+
+              doc.line(startX, startY, startX + tableWidth, startY);
+              doc.line(startX, startY + footerHeight, startX + tableWidth, startY + footerHeight);
+            }
+          }
+        },
+        didDrawCell: function(data) {
+          // Custom rendering for Product Name column (column 1) in body
+          if (data.section === 'body' && data.column.index === 1) {
+            const prodData = productsData[data.row.index];
+            if (prodData) {
+              const cellCenterX = data.cell.x + data.cell.width / 2;
+              const topY = data.cell.y + 7;
+              const bottomY = data.cell.y + 13;
+
+              doc.setFontSize(11);
+              doc.setFont('helvetica', 'normal');
+              doc.setTextColor(0, 0, 0);
+              doc.text(prodData.productName, cellCenterX, topY, { align: 'center' });
+
+              if (prodData.category) {
+                doc.setFontSize(8);
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(0, 0, 0);
+                doc.text(`(${prodData.category})`, cellCenterX, bottomY, { align: 'center' });
+              }
+            }
+          }
+
+          if (data.section === 'foot' && data.row.index === 0) {
+            data.cell.y += 3;
           }
         },
       });
 
-      // Totals Section
-      const finalY = doc.lastAutoTable.finalY + 10;
-      const totalsX = pageWidth - margin - 70;
-
-      doc.setFontSize(9);
-      doc.setTextColor(...grayColor);
-      doc.text('Total Products:', totalsX, finalY);
-      doc.setTextColor(...primaryColor);
-      doc.text(`${filteredProducts.length}`, pageWidth - margin, finalY, { align: 'right' });
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Total Value:', totalsX, finalY + 7);
-      doc.text(`Rs ${totalStockValue.toLocaleString('en-PK', { maximumFractionDigits: 0 })}`, pageWidth - margin, finalY + 7, { align: 'right' });
-
-      // Footer on all pages
-      const pageCount = doc.internal.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
+      // Page numbers and footer
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
-        doc.setFontSize(8);
+
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.4);
+        doc.line(margin, pageHeight - 18, pageWidth - margin, pageHeight - 18);
+
+        doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor(...grayColor);
-        doc.text(`Page ${i} of ${pageCount}`, margin, pageHeight - 10);
-        doc.text('Powered by airoxlab.com', pageWidth - margin, pageHeight - 10, { align: 'right' });
+        doc.setTextColor(100, 100, 100);
+        doc.text(`page ${i} of ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
       }
 
       doc.save(`Stock_Availability_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -581,51 +728,59 @@ export default function StockAvailabilityPage() {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl border border-neutral-200 p-4">
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl border border-blue-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-neutral-500">Total Products</p>
-                <p className="text-2xl font-bold text-neutral-900">{filteredProducts.length}</p>
+                <p className="text-xs text-blue-600 font-medium">Total Products</p>
+                <p className="text-xl font-bold text-blue-900">{filteredProducts.length}</p>
               </div>
-              <Package className="w-6 h-6 text-blue-500" />
+              <div className="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                <Package className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-neutral-200 p-4">
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-100 rounded-xl border border-emerald-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-neutral-500">Stock Value</p>
-                <p className="text-2xl font-bold text-neutral-900">
+                <p className="text-xs text-emerald-600 font-medium">Stock Value</p>
+                <p className="text-xl font-bold text-emerald-900">
                   {totalStockValue.toLocaleString('en-PK', { maximumFractionDigits: 0 })}
                 </p>
               </div>
-              <TrendingUp className="w-6 h-6 text-green-500" />
+              <div className="w-10 h-10 rounded-lg bg-emerald-500 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-neutral-200 p-4">
+          <div className="bg-gradient-to-br from-amber-50 to-yellow-100 rounded-xl border border-amber-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-neutral-500">Low Stock</p>
-                <p className="text-2xl font-bold text-yellow-600">{lowStockCount}</p>
+                <p className="text-xs text-amber-600 font-medium">Low Stock</p>
+                <p className="text-xl font-bold text-amber-900">{lowStockCount}</p>
               </div>
-              <AlertTriangle className="w-6 h-6 text-yellow-500" />
+              <div className="w-10 h-10 rounded-lg bg-amber-500 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-neutral-200 p-4">
+          <div className="bg-gradient-to-br from-red-50 to-rose-100 rounded-xl border border-red-100 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-neutral-500">Out of Stock</p>
-                <p className="text-2xl font-bold text-red-600">{outOfStockCount}</p>
+                <p className="text-xs text-red-600 font-medium">Out of Stock</p>
+                <p className="text-xl font-bold text-red-900">{outOfStockCount}</p>
               </div>
-              <TrendingDown className="w-6 h-6 text-red-500" />
+              <div className="w-10 h-10 rounded-lg bg-red-500 flex items-center justify-center">
+                <TrendingDown className="w-5 h-5 text-white" />
+              </div>
             </div>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-neutral-200 p-3">
+        <div className="bg-white/80 backdrop-blur-xl rounded-xl border border-neutral-200/60 p-3 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-400" />
@@ -701,7 +856,7 @@ export default function StockAvailabilityPage() {
         </div>
 
         {/* Products Table */}
-        <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+        <div className="bg-white/80 backdrop-blur-xl rounded-xl border border-neutral-200/60 overflow-hidden shadow-sm">
           <div className="p-4 border-b border-neutral-200">
             <h2 className="text-sm font-semibold text-neutral-900">Product Stock Levels</h2>
           </div>
