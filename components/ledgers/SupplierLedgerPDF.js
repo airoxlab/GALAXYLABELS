@@ -346,6 +346,19 @@ export async function generateSupplierLedgerPDF(supplier, ledgerEntries, stats, 
 }
 
 /**
+ * View supplier ledger PDF in new window
+ */
+export async function viewSupplierLedgerPDF(supplier, ledgerEntries, stats, settings) {
+  try {
+    const doc = await generateSupplierLedgerPDF(supplier, ledgerEntries, stats, settings);
+    doc.output('dataurlnewwindow');
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    throw new Error('Failed to generate PDF: ' + error.message);
+  }
+}
+
+/**
  * Download supplier ledger PDF
  */
 export async function downloadSupplierLedgerPDF(supplier, ledgerEntries, stats, settings) {

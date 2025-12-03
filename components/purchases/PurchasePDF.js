@@ -190,8 +190,6 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
     String(item.idx),
     '',
     String(item.qty),
-    item.weight.toFixed(2),
-    item.netWeight.toFixed(2),
     item.unit,
     item.price.toFixed(2),
     '',
@@ -200,9 +198,9 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
 
   autoTable(doc, {
     startY: y,
-    head: [['S.N', 'Item Name', 'Qty', 'Weight', 'Net Wt.', 'Unit', 'Price', 'Tax', 'Amount']],
+    head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
     body: simpleTableBody,
-    foot: [['TOTAL', '', String(totalQty), '', totalNetWeight.toFixed(2), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
+    foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
     theme: 'plain',
     headStyles: {
       fillColor: [255, 255, 255],
@@ -235,15 +233,13 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
       cellPadding: { top: 6, right: 0.75, bottom: 1, left: 0.75 },
     },
     columnStyles: {
-      0: { halign: 'center', cellWidth: 14 },
-      1: { halign: 'center', cellWidth: 42 },
-      2: { halign: 'center', cellWidth: 18 },
-      3: { halign: 'center', cellWidth: 18 },
-      4: { halign: 'center', cellWidth: 20 },
-      5: { halign: 'center', cellWidth: 18 },
-      6: { halign: 'center', cellWidth: 22 },
-      7: { halign: 'center', cellWidth: 20 },
-      8: { halign: 'center', cellWidth: 23 },
+      0: { halign: 'center', cellWidth: 18 },
+      1: { halign: 'center', cellWidth: 52 },
+      2: { halign: 'center', cellWidth: 22 },
+      3: { halign: 'center', cellWidth: 22 },
+      4: { halign: 'center', cellWidth: 28 },
+      5: { halign: 'center', cellWidth: 25 },
+      6: { halign: 'center', cellWidth: 28 },
     },
     tableWidth: 195,
     styles: { overflow: 'linebreak', cellPadding: 1.5 },
@@ -321,11 +317,13 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
           const topY = data.cell.y + 6;
           const bottomY = data.cell.y + 11;
 
-          doc.setFontSize(9);
+          // Draw product name - BLACK
+          doc.setFontSize(10);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
           doc.text(itemData.productName, cellCenterX, topY, { align: 'center' });
 
+          // Draw category - BLACK
           if (itemData.category) {
             doc.setFontSize(7);
             doc.setFont('helvetica', 'normal');
@@ -335,15 +333,15 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
         }
       }
 
-      // Custom rendering for Tax column (column 7) in body
-      if (data.section === 'body' && data.column.index === 7) {
+      // Custom rendering for Tax column (column 5) in body
+      if (data.section === 'body' && data.column.index === 5) {
         const itemData = itemsData[data.row.index];
         if (itemData) {
           const cellCenterX = data.cell.x + data.cell.width / 2;
           const topY = data.cell.y + 6;
           const bottomY = data.cell.y + 11;
 
-          doc.setFontSize(9);
+          doc.setFontSize(10);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
           doc.text(formatCurrency(itemData.taxAmt), cellCenterX, topY, { align: 'center' });

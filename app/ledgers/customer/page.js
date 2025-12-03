@@ -8,11 +8,11 @@ import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
 import { notify } from '@/components/ui/Notifications';
 import {
-  Download, ChevronLeft, ChevronRight, Search, X,
+  Eye, ChevronLeft, ChevronRight, Search, X,
   Users, TrendingUp, FileText, DollarSign,
   CheckCircle, Clock, AlertCircle
 } from 'lucide-react';
-import { downloadCustomerLedgerPDF } from '@/components/ledgers/CustomerLedgerPDF';
+import { viewCustomerLedgerPDF } from '@/components/ledgers/CustomerLedgerPDF';
 
 export default function CustomerLedgerPage() {
   const router = useRouter();
@@ -344,7 +344,7 @@ export default function CustomerLedgerPage() {
     setCurrentPage(1);
   }
 
-  async function handleDownloadPDF() {
+  async function handleViewPDF() {
     if (!customerStats) {
       notify.error('No ledger data available');
       return;
@@ -355,16 +355,15 @@ export default function CustomerLedgerPage() {
         ? customers.find(c => c.id.toString() === selectedCustomer)
         : { customer_name: 'All Customers', mobile_no: '' };
 
-      await downloadCustomerLedgerPDF(
+      await viewCustomerLedgerPDF(
         customerData,
         filteredLedger,
         customerStats,
         settings
       );
-      notify.success('PDF downloaded successfully!');
     } catch (error) {
-      console.error('Error downloading PDF:', error);
-      notify.error('Error downloading PDF: ' + error.message);
+      console.error('Error viewing PDF:', error);
+      notify.error('Error viewing PDF: ' + error.message);
     }
   }
 
@@ -430,14 +429,14 @@ export default function CustomerLedgerPage() {
           </div>
           {customerStats && (
             <button
-              onClick={handleDownloadPDF}
+              onClick={handleViewPDF}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all",
                 "bg-neutral-900 text-white hover:bg-neutral-800"
               )}
             >
-              <Download className="w-4 h-4" />
-              Download Ledger
+              <Eye className="w-4 h-4" />
+              View Ledger
             </button>
           )}
         </div>

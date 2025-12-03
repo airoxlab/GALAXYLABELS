@@ -490,22 +490,21 @@ export default function NewPurchaseOrderPage() {
       let finalPayable = total;
 
       if (editingOrderId) {
-        // For editing: fetch supplier + update order in parallel
-        const [supplierResult, orderResult] = await Promise.all([
+        // For editing: fetch supplier + update order + delete items in parallel
+        const [supplierResult, orderResult, deleteResult] = await Promise.all([
           supabase.from('suppliers').select('current_balance').eq('id', formData.supplier_id).single(),
-          supabase.from('purchase_orders').update(orderData).eq('id', editingOrderId).select().single()
+          supabase.from('purchase_orders').update(orderData).eq('id', editingOrderId).select().single(),
+          supabase.from('purchase_order_items').delete().eq('po_id', editingOrderId)
         ]);
 
         if (orderResult.error) throw orderResult.error;
+        if (deleteResult.error) throw deleteResult.error;
         order = orderResult.data;
         previousBalance = supplierResult.data?.current_balance || 0;
         finalPayable = previousBalance + total;
 
         // Update order with balance info
         await supabase.from('purchase_orders').update({ previous_balance: previousBalance, final_payable: finalPayable }).eq('id', order.id);
-
-        // Delete existing order items (run in background)
-        supabase.from('purchase_order_items').delete().eq('po_id', editingOrderId);
       } else {
         // For new order: fetch supplier + insert order in parallel
         const [supplierResult, orderResult] = await Promise.all([
@@ -639,13 +638,15 @@ export default function NewPurchaseOrderPage() {
         style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
       });
 
-      // Download PDF if requested - must await before resetting form
+      // Download PDF if requested
       if (shouldDownloadPdf && saveAs !== 'draft') {
         await handleDownloadPDF(order.id, shouldPrint);
       }
 
-      // Reset form and refresh data
-      resetForm();
+      // Set editing order ID so subsequent saves update this order
+      setEditingOrderId(order.id);
+
+      // Refresh data
       fetchDrafts(user.parentUserId || user.id);
       fetchSettings(user.parentUserId || user.id);
     } catch (error) {
@@ -716,6 +717,12 @@ export default function NewPurchaseOrderPage() {
     setEditingOrderId(null);
   }
 
+  async function handleSaveAndClose(e, saveAs = 'pending', shouldDownloadPdf = false, shouldPrint = false) {
+    await handleSubmit(e, saveAs, shouldDownloadPdf, shouldPrint);
+    // After saving, reset the form
+    resetForm();
+  }
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
   };
@@ -750,6 +757,22 @@ export default function NewPurchaseOrderPage() {
           </div>
           <div className="flex items-center gap-2">
             {DraftsToggle}
+            {editingOrderId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-medium",
+                  "border border-neutral-200/60",
+                  "bg-blue-500 text-white hover:bg-blue-600",
+                  "transition-all duration-200",
+                  "flex items-center gap-1.5"
+                )}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                New Order
+              </button>
+            )}
             <button
               type="button"
               onClick={() => router.push('/purchases')}
@@ -779,7 +802,7 @@ export default function NewPurchaseOrderPage() {
             "p-5"
           )}>
             {/* Top Fields */}
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
+            <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-5">
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">PO #</label>
                 <input
@@ -797,7 +820,7 @@ export default function NewPurchaseOrderPage() {
                 />
               </div>
 
-              <div>
+              <div className="col-span-2">
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">Supplier *</label>
                 <SearchableDropdown
                   options={supplierOptions}
@@ -1108,7 +1131,7 @@ export default function NewPurchaseOrderPage() {
               </button>
               <button
                 type="button"
-                onClick={(e) => handleSubmit(e, 'pending', false)}
+                onClick={(e) => handleSaveAndClose(e, 'pending', false)}
                 disabled={saving}
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-xl font-medium text-sm",
@@ -1120,7 +1143,7 @@ export default function NewPurchaseOrderPage() {
                 )}
               >
                 <Save className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Save Order'}
+                {saving ? 'Saving...' : 'Save & Close'}
               </button>
               <button
                 type="button"

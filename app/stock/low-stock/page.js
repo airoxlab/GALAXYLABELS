@@ -243,9 +243,6 @@ export default function LowStockPage() {
       if (settings?.logo_url) {
         images.logo = await getImageAsBase64(settings.logo_url, 200, 0.9);
       }
-      if (settings?.qr_code_url) {
-        images.qr = await getImageAsBase64(settings.qr_code_url, 150, 0.9);
-      }
 
       // Prepare data with category
       const productsData = filteredProducts.map((product, idx) => ({
@@ -304,14 +301,6 @@ export default function LowStockPage() {
         doc.text(tax, centerX, contactY, { align: 'center' });
       }
 
-      // QR Code (right aligned)
-      if (images.qr) {
-        try {
-          doc.addImage(images.qr, 'JPEG', pageWidth - margin - 30, y, 30, 30);
-        } catch (error) {
-          console.error('Error adding QR code:', error);
-        }
-      }
 
       y += 45;
       doc.setDrawColor(0, 0, 0);

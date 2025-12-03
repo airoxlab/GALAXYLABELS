@@ -40,7 +40,7 @@ export default function PurchaseViewModal({ purchaseId, isOpen, onClose, setting
           .single(),
         supabase
           .from('purchase_order_items')
-          .select('*')
+          .select('*, products(categories(name))')
           .eq('po_id', purchaseId)
       ]);
 

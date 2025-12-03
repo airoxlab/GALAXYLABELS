@@ -100,7 +100,7 @@ export async function generateInvoicePDF(invoice, items, settings, options = {})
   }
 
   // Calculate totals
-  let totalQty = 0, totalTax = 0, totalAmount = 0;
+  let totalQty = 0, totalTax = 0, totalAmount = 0, totalNetWeight = 0;
 
   const getCategory = (item) => item.category || item.products?.categories?.name || '';
 
@@ -108,6 +108,8 @@ export async function generateInvoicePDF(invoice, items, settings, options = {})
   const itemsData = items.map((item, idx) => {
     const qty = item.quantity || 0;
     const price = item.unit_price || 0;
+    const weight = item.weight || 0;
+    const netWeight = qty * weight;
     const taxPercent = invoice.gst_percentage || 0;
     const taxAmt = (price * qty * taxPercent) / 100;
     const amount = (price * qty) + taxAmt;
@@ -115,6 +117,7 @@ export async function generateInvoicePDF(invoice, items, settings, options = {})
     totalQty += qty;
     totalTax += taxAmt;
     totalAmount += amount;
+    totalNetWeight += netWeight;
 
     const category = getCategory(item);
     return {
@@ -122,6 +125,8 @@ export async function generateInvoicePDF(invoice, items, settings, options = {})
       productName: item.product_name,
       category: category,
       qty: qty,
+      weight: weight,
+      netWeight: netWeight,
       unit: item.unit || 'PCS',
       price: price,
       taxAmt: taxAmt,
@@ -239,9 +244,9 @@ export async function generateInvoicePDF(invoice, items, settings, options = {})
 
   // ===== TABLE =====
 autoTable(doc, {
-  startY: y,
+  startY: tableStartY,
   head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
-  body: simpleTableBody,
+  body: tableBody,
   foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
   theme: 'plain',
   headStyles: {
@@ -272,12 +277,11 @@ autoTable(doc, {
     halign: 'center',
     valign: 'middle',
     lineWidth: 0,
-    cellPadding: { top: 5, right: 0.75, bottom: 3, left: 0.75 },
+    cellPadding: { top: 6, right: 0.75, bottom: 1, left: 0.75 },
   },
   columnStyles: {
     0: { halign: 'center', cellWidth: 18 },
     1: { halign: 'center', cellWidth: 52 },
-    
     2: { halign: 'center', cellWidth: 22 },
     3: { halign: 'center', cellWidth: 22 },
     4: { halign: 'center', cellWidth: 28 },
@@ -295,9 +299,9 @@ willDrawPage: function(data) {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(80, 80, 80);
-    doc.text(`Sale Order # ${order.order_no || order.invoice_no || '-'}`, margin, 12);
-    doc.text(`Customer PO # ${order.customer_po || '-'}`, pageWidth - margin, 12, { align: 'right' });
-    
+    doc.text(`Invoice # ${invoice.invoice_no || '-'}`, margin, 12);
+    doc.text(`Customer PO # ${invoice.customer_po || '-'}`, pageWidth - margin, 12, { align: 'right' });
+
     // Set table start position below the continuation header
     data.settings.startY = 32;
   }
@@ -310,13 +314,13 @@ didDrawPage: function(data) {
     const startY = headerRow.cells[0].y;
     const tableWidth = 195;
     const borderHeight = headerRow.height - 3;
-    
+
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.3);
-    
+
     // Draw outer rectangle
     doc.rect(startX, startY, tableWidth, borderHeight);
-    
+
     // Draw vertical separators between columns
     let currentX = startX;
     const cells = headerRow.cells;
@@ -327,30 +331,28 @@ didDrawPage: function(data) {
       }
     });
   }
-  
-  // Draw border around footer row with column separators
+
+  // Draw border around footer row WITHOUT vertical separators
   const footerRow = data.table.foot[0];
   if (footerRow && footerRow.cells[0]) {
     const startX = footerRow.cells[0].x;
     const startY = footerRow.cells[0].y;
     const tableWidth = 195;
     const footerHeight = footerRow.height;
-    
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(0.3);
-    
-    // Draw outer rectangle
-    doc.rect(startX, startY, tableWidth, footerHeight);
-    
-    // Draw vertical separators between columns
-    let currentX = startX;
-    const cells = footerRow.cells;
-    Object.keys(cells).forEach((key, i) => {
-      if (i < Object.keys(cells).length - 1) {
-        currentX += cells[key].width;
-        doc.line(currentX, startY, currentX, startY + footerHeight);
-      }
-    });
+
+    if (startY >= 10) {
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.3);
+
+      // Draw ONLY horizontal lines (top and bottom)
+      // Top horizontal line
+      doc.line(startX, startY, startX + tableWidth, startY);
+
+      // Bottom horizontal line
+      doc.line(startX, startY + footerHeight, startX + tableWidth, startY + footerHeight);
+
+      // No vertical column separators in footer
+    }
   }
 },
   didDrawCell: function(data) {
@@ -367,7 +369,7 @@ didDrawPage: function(data) {
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(0, 0, 0);
         doc.text(itemData.productName, cellCenterX, topY, { align: 'center' });
-        
+
         // Draw category on bottom line - BLACK
         if (itemData.category) {
           doc.setFontSize(7);
@@ -415,34 +417,43 @@ didDrawPage: function(data) {
   }
 
   // ===== INVOICE AMOUNT IN WORDS =====
+  // Amount in words - aligned with TOTAL (no shift)
+  const tableStartX = (pageWidth - 195) / 2;  // Same as TOTAL alignment
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 0, 0);
-  doc.text('INVOICE AMOUNT IN WORDS', margin, finalY);
+  doc.text('INVOICE AMOUNT IN WORDS', tableStartX, finalY);
 
-  finalY += 5;
+  // Amount text on same line, unbold
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(0, 0, 0);
-  doc.text(numberToWords(Math.round(totalAmount)).toUpperCase(), margin, finalY);
+  const labelWidth = doc.getTextWidth('INVOICE AMOUNT IN WORDS');
+  doc.text(numberToWords(Math.round(totalAmount)).toUpperCase(), tableStartX + labelWidth + 5, finalY);
 
-  finalY += 12;
+  // Draw line below spanning table width
+  finalY += 2;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.3);
+  const tableEndX = tableStartX + 195;
+  doc.line(tableStartX, finalY, tableEndX, finalY);
+
+  finalY += 10;
 
   // ===== SUMMARY =====
-  const summaryLabels = ['INV. AMOUNT', 'TAXABLE AMOUNT', 'RATE', 'TAX AMOUNT'];
+  const summaryLabels = ['INV. AMOUNT', 'TAXABLE AMOUNT', 'RATE', 'TAX AMOUNT', 'NET WEIGHT'];
   const taxableAmount = totalAmount - totalTax;
   const summaryValues = [
     formatCurrency(totalAmount),
     formatCurrency(taxableAmount),
     `${invoice.gst_percentage || 0}%`,
-    formatCurrency(totalTax)
+    formatCurrency(totalTax),
+    `${totalNetWeight.toFixed(2)} kg`
   ];
-  const summaryColors = [[0,0,0], [0,123,255], [0,0,0], [220,53,69]];
+  const summaryColors = [[0,0,0], [0,123,255], [0,0,0], [220,53,69], [180,130,0]];
 
-  const colW = (pageWidth - margin * 2) / 4;
+  const colW = (pageWidth - margin * 2) / 5;
 
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
   summaryLabels.forEach((label, i) => {
     const x = margin + (i * colW) + (colW / 2);
     doc.setTextColor(128, 128, 128);
@@ -454,7 +465,7 @@ didDrawPage: function(data) {
   });
 
   finalY += 8;
-  doc.setFontSize(9);
+  doc.setFontSize(11);
   summaryValues.forEach((val, i) => {
     const x = margin + (i * colW) + (colW / 2);
     doc.setTextColor(...summaryColors[i]);
@@ -493,9 +504,9 @@ didDrawPage: function(data) {
 /**
  * Download Invoice PDF
  */
-export async function downloadInvoicePDF(invoice, items, settings, options = {}, shouldPrint = false) {
+export async function downloadInvoicePDF(invoice, items, settings, shouldPrint = false) {
   try {
-    const doc = await generateInvoicePDF(invoice, items, settings, options);
+    const doc = await generateInvoicePDF(invoice, items, settings, {});
     if (shouldPrint) {
       const pdfBlob = doc.output('blob');
       const pdfUrl = URL.createObjectURL(pdfBlob);
@@ -663,8 +674,6 @@ export async function generateSaleOrderPDF(order, items, settings, options = {})
     String(item.idx),
     '',
     String(item.qty),
-    item.weight.toFixed(2),
-    item.netWeight.toFixed(2),
     item.unit,
     item.price.toFixed(2),
     '',
@@ -673,9 +682,9 @@ export async function generateSaleOrderPDF(order, items, settings, options = {})
 
 autoTable(doc, {
     startY: y,
-    head: [['S.N', 'Item Name', 'Qty', 'Weight', 'Net Wt.', 'Unit', 'Price', 'Tax', 'Amount']],
+    head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
     body: simpleTableBody,
-    foot: [['TOTAL', '', String(totalQty), '', totalNetWeight.toFixed(2), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
+    foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
     theme: 'plain',
     headStyles: {
       fillColor: [255, 255, 255],
@@ -708,15 +717,13 @@ autoTable(doc, {
 cellPadding: { top:6, right: 0.75, bottom: 1, left: 0.75 },
 },
     columnStyles: {
-      0: { halign: 'center', cellWidth: 14 },
-      1: { halign: 'center', cellWidth: 42 },
-      2: { halign: 'center', cellWidth: 18 },
-      3: { halign: 'center', cellWidth: 18 },
-      4: { halign: 'center', cellWidth: 20 },
-      5: { halign: 'center', cellWidth: 18 },
-      6: { halign: 'center', cellWidth: 22 },
-      7: { halign: 'center', cellWidth: 20 },
-      8: { halign: 'center', cellWidth: 23 },
+      0: { halign: 'center', cellWidth: 18 },
+      1: { halign: 'center', cellWidth: 52 },
+      2: { halign: 'center', cellWidth: 22 },
+      3: { halign: 'center', cellWidth: 22 },
+      4: { halign: 'center', cellWidth: 28 },
+      5: { halign: 'center', cellWidth: 25 },
+      6: { halign: 'center', cellWidth: 28 },
     },
     tableWidth: 195,
     styles: { overflow: 'linebreak', cellPadding: 1.5 },
@@ -838,8 +845,8 @@ didDrawPage: function(data) {
         }
       }
 
-      // Custom rendering for Tax column (column 7) in body
-      if (data.section === 'body' && data.column.index === 7) {
+      // Custom rendering for Tax column (column 5) in body
+      if (data.section === 'body' && data.column.index === 5) {
         const itemData = itemsData[data.row.index];
         if (itemData) {
           const cellCenterX = data.cell.x + data.cell.width / 2;
@@ -847,7 +854,7 @@ didDrawPage: function(data) {
           const bottomY = data.cell.y + 11;
 
           // Draw tax amount - BLACK
-          doc.setFontSize(9);
+          doc.setFontSize(10);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
           doc.text(formatCurrency(itemData.taxAmt), cellCenterX, topY, { align: 'center' });

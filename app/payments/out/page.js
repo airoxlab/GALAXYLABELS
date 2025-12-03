@@ -11,7 +11,8 @@ import Button from '@/components/ui/Button';
 import Textarea from '@/components/ui/Textarea';
 import { formatCurrency } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
-import { History } from 'lucide-react';
+import { notify } from '@/components/ui/Notifications';
+import { History, FileText } from 'lucide-react';
 
 export default function PaymentOutPage() {
   const router = useRouter();
@@ -20,6 +21,7 @@ export default function PaymentOutPage() {
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [user, setUser] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [lastSavedPayment, setLastSavedPayment] = useState(null);
 
   const [formData, setFormData] = useState({
     receipt_no: '',
@@ -138,7 +140,7 @@ export default function PaymentOutPage() {
     setFormData(prev => ({ ...prev, amount: total.toString() }));
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e, shouldClose = false) => {
     e.preventDefault();
     setLoading(true);
 
@@ -147,7 +149,7 @@ export default function PaymentOutPage() {
       const previousBalance = selectedSupplier?.current_balance || 0;
       const newBalance = previousBalance - amount;
 
-      // Insert payment - use parentUserId for data queries
+      // Prepare payment data
       const paymentData = {
         user_id: user.parentUserId || user.id,
         receipt_no: formData.receipt_no,
@@ -175,51 +177,157 @@ export default function PaymentOutPage() {
         paymentData.online_reference = formData.online_reference || null;
       }
 
-      const { data: payment, error: paymentError } = await supabase
-        .from('payments_out')
-        .insert([paymentData])
-        .select()
-        .single();
+      let payment;
 
-      if (paymentError) throw paymentError;
+      // Check if we're updating an existing payment
+      if (lastSavedPayment?.id) {
+        // Update existing payment
+        const { data: updatedPayment, error: updateError } = await supabase
+          .from('payments_out')
+          .update(paymentData)
+          .eq('id', lastSavedPayment.id)
+          .select()
+          .single();
 
-      // Update supplier balance
-      await supabase
-        .from('suppliers')
-        .update({ current_balance: newBalance })
-        .eq('id', formData.supplier_id);
+        if (updateError) throw updateError;
+        payment = updatedPayment;
 
-      // Add to supplier ledger
-      await supabase.from('supplier_ledger').insert([{
-        user_id: user.parentUserId || user.id,
-        supplier_id: parseInt(formData.supplier_id),
-        transaction_type: 'payment',
-        transaction_date: formData.date,
-        reference_id: payment.id,
-        reference_no: formData.receipt_no,
-        debit: amount,
-        credit: 0,
-        balance: newBalance,
-        description: `Payment made - ${formData.payment_method}`,
-      }]);
-
-      // Increment payment_out_next_number in settings
-      if (settings) {
-        const nextNumber = (settings.payment_out_next_number || 1) + 1;
+        // Update supplier balance
         await supabase
-          .from('settings')
-          .update({ payment_out_next_number: nextNumber })
-          .eq('user_id', user.id);
+          .from('suppliers')
+          .update({ current_balance: newBalance })
+          .eq('id', formData.supplier_id);
+
+        // Update supplier ledger
+        await supabase
+          .from('supplier_ledger')
+          .update({
+            transaction_date: formData.date,
+            debit: amount,
+            balance: newBalance,
+            description: `Payment made - ${formData.payment_method}`,
+          })
+          .eq('reference_id', lastSavedPayment.id)
+          .eq('transaction_type', 'payment');
+
+        notify.success('Payment updated successfully!');
+      } else {
+        // Insert new payment
+        const { data: newPayment, error: paymentError } = await supabase
+          .from('payments_out')
+          .insert([paymentData])
+          .select()
+          .single();
+
+        if (paymentError) throw paymentError;
+        payment = newPayment;
+
+        // Update supplier balance
+        await supabase
+          .from('suppliers')
+          .update({ current_balance: newBalance })
+          .eq('id', formData.supplier_id);
+
+        // Add to supplier ledger
+        await supabase.from('supplier_ledger').insert([{
+          user_id: user.parentUserId || user.id,
+          supplier_id: parseInt(formData.supplier_id),
+          transaction_type: 'payment',
+          transaction_date: formData.date,
+          reference_id: payment.id,
+          reference_no: formData.receipt_no,
+          debit: amount,
+          credit: 0,
+          balance: newBalance,
+          description: `Payment made - ${formData.payment_method}`,
+        }]);
+
+        // Increment payment_out_next_number in settings only for new payments
+        if (settings) {
+          const nextNumber = (settings.payment_out_next_number || 1) + 1;
+          await supabase
+            .from('settings')
+            .update({ payment_out_next_number: nextNumber })
+            .eq('user_id', user.id);
+        }
+
+        notify.success('Payment made successfully!');
       }
 
-      alert('Payment made successfully!');
-      router.push('/dashboard');
+      // Store the saved payment
+      setLastSavedPayment({
+        ...payment,
+        denominations: formData.payment_method === 'cash' ? denominations : null
+      });
+
+      // If shouldClose is true, redirect to dashboard
+      if (shouldClose) {
+        router.push('/dashboard');
+      }
     } catch (error) {
       console.error('Error recording payment:', error);
-      alert('Error: ' + error.message);
+      notify.error('Error: ' + error.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePreviewInvoice = async () => {
+    if (!selectedSupplier) {
+      notify.error('Please select a supplier first');
+      return;
+    }
+
+    if (!formData.amount || parseFloat(formData.amount) <= 0) {
+      notify.error('Please enter a valid amount');
+      return;
+    }
+
+    try {
+      const { previewPaymentOutInvoicePDF } = await import('@/components/payments/PaymentInvoicePDF');
+
+      // Create preview payment object
+      const previewPayment = lastSavedPayment || {
+        receipt_no: formData.receipt_no,
+        payment_date: formData.date,
+        date: formData.date,
+        payment_method: formData.payment_method,
+        online_reference: formData.online_reference,
+        amount: parseFloat(formData.amount),
+        supplier_balance: selectedSupplier.current_balance - parseFloat(formData.amount),
+        notes: formData.notes,
+      };
+
+      await previewPaymentOutInvoicePDF(previewPayment, selectedSupplier, settings, { showLogo: true });
+      notify.success('Invoice opened in new tab!');
+    } catch (error) {
+      console.error('Error previewing invoice:', error);
+      notify.error('Error previewing invoice: ' + error.message);
+    }
+  };
+
+  const handleNewPayment = () => {
+    setLastSavedPayment(null);
+    setFormData({
+      receipt_no: '',
+      date: new Date().toISOString().split('T')[0],
+      supplier_id: '',
+      payment_method: 'cash',
+      online_reference: '',
+      amount: '',
+      notes: '',
+    });
+    setDenominations({
+      note_5000: 0,
+      note_1000: 0,
+      note_500: 0,
+      note_100: 0,
+      note_50: 0,
+      note_20: 0,
+      note_10: 0,
+    });
+    setSelectedSupplier(null);
+    if (user) generateReceiptNo(user.parentUserId || user.id);
   };
 
   return (
@@ -240,14 +348,28 @@ export default function PaymentOutPage() {
               </p>
             </div>
           </div>
-          <Button
-            variant="secondary"
-            onClick={() => router.push('/payments/history')}
-            className="flex items-center gap-2"
-          >
-            <History className="w-4 h-4" />
-            History
-          </Button>
+          <div className="flex items-center gap-2">
+            {lastSavedPayment && (
+              <Button
+                variant="outline"
+                onClick={handleNewPayment}
+                className="flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Record
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => router.push('/payments/history')}
+              className="flex items-center gap-2"
+            >
+              <History className="w-4 h-4" />
+              History
+            </Button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off">
@@ -397,24 +519,37 @@ export default function PaymentOutPage() {
             </Card>
           )}
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-end">
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-4 justify-between">
             <Button
               type="button"
-              variant="secondary"
-              onClick={() => router.back()}
-              disabled={loading}
-              className="w-full sm:w-auto"
+              variant="outline"
+              onClick={handlePreviewInvoice}
+              disabled={!selectedSupplier || !formData.amount}
+              className="w-full sm:w-auto flex items-center gap-2"
             >
-              Cancel
+              <FileText className="w-4 h-4" />
+              Preview Payment Invoice
             </Button>
-            <Button
-              type="submit"
-              variant="danger"
-              disabled={loading}
-              className="w-full sm:w-auto"
-            >
-              {loading ? 'Processing...' : 'Make Payment'}
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <Button
+                type="submit"
+                variant="danger"
+                disabled={loading}
+                className="w-full sm:w-auto"
+              >
+                {loading ? 'Processing...' : lastSavedPayment ? 'Update Payment' : 'Save Payment'}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={(e) => handleSubmit(e, true)}
+                disabled={loading}
+                className="w-full sm:w-auto"
+              >
+                {loading ? 'Processing...' : 'Save & Close'}
+              </Button>
+            </div>
           </div>
         </form>
       </div>

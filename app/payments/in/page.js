@@ -12,7 +12,7 @@ import Textarea from '@/components/ui/Textarea';
 import { formatCurrency } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { notify } from '@/components/ui/Notifications';
-import { Download, History } from 'lucide-react';
+import { Download, History, FileText } from 'lucide-react';
 
 export default function PaymentInPage() {
   const router = useRouter();
@@ -140,7 +140,7 @@ export default function PaymentInPage() {
     setFormData(prev => ({ ...prev, amount: total.toString() }));
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e, shouldClose = false) => {
     e.preventDefault();
     setLoading(true);
 
@@ -149,7 +149,7 @@ export default function PaymentInPage() {
       const previousBalance = selectedCustomer?.current_balance || 0;
       const newBalance = previousBalance - amount;
 
-      // Insert payment
+      // Prepare payment data
       const paymentData = {
         user_id: userId,
         receipt_no: formData.receipt_no,
@@ -177,50 +177,93 @@ export default function PaymentInPage() {
         paymentData.online_reference = formData.online_reference || null;
       }
 
-      const { data: payment, error: paymentError } = await supabase
-        .from('payments_in')
-        .insert([paymentData])
-        .select()
-        .single();
+      let payment;
 
-      if (paymentError) throw paymentError;
+      // Check if we're updating an existing payment
+      if (lastSavedPayment?.id) {
+        // Update existing payment
+        const { data: updatedPayment, error: updateError } = await supabase
+          .from('payments_in')
+          .update(paymentData)
+          .eq('id', lastSavedPayment.id)
+          .select()
+          .single();
 
-      // Update customer balance
-      await supabase
-        .from('customers')
-        .update({ current_balance: newBalance })
-        .eq('id', formData.customer_id);
+        if (updateError) throw updateError;
+        payment = updatedPayment;
 
-      // Add to customer ledger
-      await supabase.from('customer_ledger').insert([{
-        user_id: userId,
-        customer_id: formData.customer_id,
-        transaction_type: 'payment',
-        transaction_date: formData.date,
-        reference_id: payment.id,
-        reference_no: formData.receipt_no,
-        debit: 0,
-        credit: amount,
-        balance: newBalance,
-        description: `Payment received - ${formData.payment_method}`,
-      }]);
-
-      // Increment payment_in_next_number in settings
-      if (settings) {
-        const nextNumber = (settings.payment_in_next_number || 1) + 1;
+        // Update customer balance
         await supabase
-          .from('settings')
-          .update({ payment_in_next_number: nextNumber })
-          .eq('user_id', userId);
+          .from('customers')
+          .update({ current_balance: newBalance })
+          .eq('id', formData.customer_id);
+
+        // Update customer ledger
+        await supabase
+          .from('customer_ledger')
+          .update({
+            transaction_date: formData.date,
+            credit: amount,
+            balance: newBalance,
+            description: `Payment received - ${formData.payment_method}`,
+          })
+          .eq('reference_id', lastSavedPayment.id)
+          .eq('transaction_type', 'payment');
+
+        notify.success('Payment updated successfully!');
+      } else {
+        // Insert new payment
+        const { data: newPayment, error: paymentError } = await supabase
+          .from('payments_in')
+          .insert([paymentData])
+          .select()
+          .single();
+
+        if (paymentError) throw paymentError;
+        payment = newPayment;
+
+        // Update customer balance
+        await supabase
+          .from('customers')
+          .update({ current_balance: newBalance })
+          .eq('id', formData.customer_id);
+
+        // Add to customer ledger
+        await supabase.from('customer_ledger').insert([{
+          user_id: userId,
+          customer_id: formData.customer_id,
+          transaction_type: 'payment',
+          transaction_date: formData.date,
+          reference_id: payment.id,
+          reference_no: formData.receipt_no,
+          debit: 0,
+          credit: amount,
+          balance: newBalance,
+          description: `Payment received - ${formData.payment_method}`,
+        }]);
+
+        // Increment payment_in_next_number in settings only for new payments
+        if (settings) {
+          const nextNumber = (settings.payment_in_next_number || 1) + 1;
+          await supabase
+            .from('settings')
+            .update({ payment_in_next_number: nextNumber })
+            .eq('user_id', userId);
+        }
+
+        notify.success('Payment received successfully!');
       }
 
-      // Store the saved payment for download
+      // Store the saved payment
       setLastSavedPayment({
         ...payment,
         denominations: formData.payment_method === 'cash' ? denominations : null
       });
 
-      notify.success('Payment received successfully!');
+      // If shouldClose is true, redirect to dashboard
+      if (shouldClose) {
+        router.push('/dashboard');
+      }
     } catch (error) {
       console.error('Error recording payment:', error);
       notify.error('Error: ' + error.message);
@@ -242,6 +285,40 @@ export default function PaymentInPage() {
     } catch (error) {
       console.error('Error downloading receipt:', error);
       notify.error('Error downloading receipt: ' + error.message);
+    }
+  };
+
+  const handlePreviewInvoice = async () => {
+    if (!selectedCustomer) {
+      notify.error('Please select a customer first');
+      return;
+    }
+
+    if (!formData.amount || parseFloat(formData.amount) <= 0) {
+      notify.error('Please enter a valid amount');
+      return;
+    }
+
+    try {
+      const { previewPaymentInInvoicePDF } = await import('@/components/payments/PaymentInvoicePDF');
+
+      // Create preview payment object
+      const previewPayment = lastSavedPayment || {
+        receipt_no: formData.receipt_no,
+        payment_date: formData.date,
+        date: formData.date,
+        payment_method: formData.payment_method,
+        online_reference: formData.online_reference,
+        amount: parseFloat(formData.amount),
+        customer_balance: selectedCustomer.current_balance - parseFloat(formData.amount),
+        notes: formData.notes,
+      };
+
+      await previewPaymentInInvoicePDF(previewPayment, selectedCustomer, settings, { showLogo: true });
+      notify.success('Invoice opened in new tab!');
+    } catch (error) {
+      console.error('Error previewing invoice:', error);
+      notify.error('Error previewing invoice: ' + error.message);
     }
   };
 
@@ -292,14 +369,28 @@ export default function PaymentInPage() {
               </p>
             </div>
           </div>
-          <Button
-            variant="secondary"
-            onClick={() => router.push('/payments/history')}
-            className="flex items-center gap-2"
-          >
-            <History className="w-4 h-4" />
-            History
-          </Button>
+          <div className="flex items-center gap-2">
+            {lastSavedPayment && (
+              <Button
+                variant="outline"
+                onClick={handleNewPayment}
+                className="flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Record
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => router.push('/payments/history')}
+              className="flex items-center gap-2"
+            >
+              <History className="w-4 h-4" />
+              History
+            </Button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off">
@@ -450,51 +541,46 @@ export default function PaymentInPage() {
           )}
 
           {/* Action Buttons */}
-          {lastSavedPayment ? (
-            // After saving - show download and new payment options
-            <div className="flex flex-col sm:flex-row gap-4 justify-end">
+          <div className="flex flex-col sm:flex-row gap-4 justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handlePreviewInvoice}
+              disabled={!selectedCustomer || !formData.amount}
+              className="w-full sm:w-auto flex items-center gap-2"
+            >
+              <FileText className="w-4 h-4" />
+              Preview Payment Invoice
+            </Button>
+            <div className="flex flex-col sm:flex-row gap-4">
+              {lastSavedPayment && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleDownloadReceipt}
+                  className="w-full sm:w-auto flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Receipt
+                </Button>
+              )}
               <Button
-                type="button"
-                variant="secondary"
-                onClick={() => router.push('/dashboard')}
-                className="w-full sm:w-auto"
-              >
-                Back to Dashboard
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleNewPayment}
-                className="w-full sm:w-auto"
-              >
-                New Payment
-              </Button>
-              <Button
-                type="button"
-                onClick={handleDownloadReceipt}
-                className="w-full sm:w-auto flex items-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                Download Receipt
-              </Button>
-            </div>
-          ) : (
-            // Before saving - show cancel and save options
-            <div className="flex flex-col sm:flex-row gap-4 justify-end">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => router.back()}
+                type="submit"
                 disabled={loading}
                 className="w-full sm:w-auto"
               >
-                Cancel
+                {loading ? 'Processing...' : lastSavedPayment ? 'Update Payment' : 'Save Payment'}
               </Button>
-              <Button type="submit" disabled={loading} className="w-full sm:w-auto">
-                {loading ? 'Processing...' : 'Receive Payment'}
+              <Button
+                type="button"
+                onClick={(e) => handleSubmit(e, true)}
+                disabled={loading}
+                className="w-full sm:w-auto"
+              >
+                {loading ? 'Processing...' : 'Save & Close'}
               </Button>
             </div>
-          )}
+          </div>
         </form>
       </div>
     </DashboardLayout>

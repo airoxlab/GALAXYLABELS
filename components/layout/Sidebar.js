@@ -93,6 +93,12 @@ const getMenuItems = (hasPermission) => [
         icon: <ClipboardList className="w-4 h-4" />,
         permission: () => hasPermission('sales_invoice_view')
       },
+      {
+        title: "Sales Invoices",
+        href: "/sales/invoices",
+        icon: <FileText className="w-4 h-4" />,
+        permission: () => hasPermission('sales_invoice_view')
+      },
     ],
   },
   {

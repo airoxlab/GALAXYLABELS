@@ -475,18 +475,17 @@ export default function NewSaleOrderPage() {
 
       if (editingOrderId) {
         // For editing: fetch customer + update order + delete items in parallel
-        const [customerResult, orderResult] = await Promise.all([
+        const [customerResult, orderResult, deleteResult] = await Promise.all([
           supabase.from('customers').select('current_balance').eq('id', formData.customer_id).single(),
-          supabase.from('sale_orders').update(orderData).eq('id', editingOrderId).select().single()
+          supabase.from('sale_orders').update(orderData).eq('id', editingOrderId).select().single(),
+          supabase.from('sale_order_items').delete().eq('order_id', editingOrderId)
         ]);
 
         if (orderResult.error) throw orderResult.error;
+        if (deleteResult.error) throw deleteResult.error;
         order = orderResult.data;
         previousBalance = customerResult.data?.current_balance || 0;
         finalBalance = previousBalance + total;
-
-        // Delete existing order items (can run in background for editing)
-        supabase.from('sale_order_items').delete().eq('order_id', editingOrderId);
       } else {
         // For new order: fetch customer + insert order in parallel
         const [customerResult, orderResult] = await Promise.all([
@@ -624,8 +623,10 @@ export default function NewSaleOrderPage() {
         await handleDownloadPDF(order.id, shouldPrint);
       }
 
-      // Reset form and refresh data
-      resetForm();
+      // Set editing order ID so subsequent saves update this order
+      setEditingOrderId(order.id);
+
+      // Refresh data
       fetchDrafts(user.parentUserId || user.id);
       fetchSettings(user.parentUserId || user.id);
     } catch (error) {
@@ -696,6 +697,12 @@ export default function NewSaleOrderPage() {
     setEditingOrderId(null);
   }
 
+  async function handleSaveAndClose(e, saveAs = 'finalized', shouldDownloadPdf = false, shouldPrint = false) {
+    await handleSubmit(e, saveAs, shouldDownloadPdf, shouldPrint);
+    // After saving, reset the form
+    resetForm();
+  }
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
   };
@@ -755,6 +762,22 @@ export default function NewSaleOrderPage() {
           </div>
           <div className="flex items-center gap-2">
             {DraftsToggle}
+            {editingOrderId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-medium",
+                  "border border-neutral-200/60",
+                  "bg-blue-500 text-white hover:bg-blue-600",
+                  "transition-all duration-200",
+                  "flex items-center gap-1.5"
+                )}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                New Order
+              </button>
+            )}
             <button
               type="button"
               onClick={() => router.push('/sales')}
@@ -1093,7 +1116,7 @@ export default function NewSaleOrderPage() {
               </button>
               <button
                 type="button"
-                onClick={(e) => handleSubmit(e, 'finalized', false)}
+                onClick={(e) => handleSaveAndClose(e, 'finalized', false)}
                 disabled={saving}
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-xl font-medium text-sm",
@@ -1106,7 +1129,7 @@ export default function NewSaleOrderPage() {
                 )}
               >
                 <Save className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Save Order'}
+                {saving ? 'Saving...' : 'Save & Close'}
               </button>
               <button
                 type="button"

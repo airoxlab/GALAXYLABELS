@@ -8,11 +8,11 @@ import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
 import { notify } from '@/components/ui/Notifications';
 import {
-  Download, ChevronLeft, ChevronRight, Search, X,
+  Eye, ChevronLeft, ChevronRight, Search, X,
   Building2, TrendingDown, FileText, DollarSign,
   CheckCircle, Clock, AlertTriangle, Loader2
 } from 'lucide-react';
-import { downloadSupplierLedgerPDF } from '@/components/ledgers/SupplierLedgerPDF';
+import { viewSupplierLedgerPDF } from '@/components/ledgers/SupplierLedgerPDF';
 
 export default function SupplierLedgerPage() {
   const router = useRouter();
@@ -212,7 +212,7 @@ export default function SupplierLedgerPage() {
     setCurrentPage(1);
   }
 
-  async function handleDownloadPDF() {
+  async function handleViewPDF() {
     if (!supplierStats) {
       notify.error('No ledger data available');
       return;
@@ -235,16 +235,15 @@ export default function SupplierLedgerPage() {
         outstandingBalance: pdfOutstandingBalance
       };
 
-      await downloadSupplierLedgerPDF(
+      await viewSupplierLedgerPDF(
         supplierData,
         filteredLedger,
         pdfStats,
         settings
       );
-      notify.success('PDF downloaded successfully!');
     } catch (error) {
-      console.error('Error downloading PDF:', error);
-      notify.error('Error downloading PDF: ' + error.message);
+      console.error('Error viewing PDF:', error);
+      notify.error('Error viewing PDF: ' + error.message);
     }
   }
 
@@ -310,14 +309,14 @@ export default function SupplierLedgerPage() {
           </div>
           {supplierStats && (
             <button
-              onClick={handleDownloadPDF}
+              onClick={handleViewPDF}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all",
                 "bg-neutral-900 text-white hover:bg-neutral-800"
               )}
             >
-              <Download className="w-4 h-4" />
-              Download Ledger
+              <Eye className="w-4 h-4" />
+              View Ledger
             </button>
           )}
         </div>
