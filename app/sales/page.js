@@ -213,6 +213,90 @@ export default function SalesPage() {
     setEditingOrderId(null);
   }
 
+  async function handleConvertToInvoice(sale) {
+    try {
+      const userId = user.parentUserId || user.id;
+
+      // Fetch order items
+      const { data: orderItems, error: itemsError } = await supabase
+        .from('sale_order_items')
+        .select('*')
+        .eq('order_id', sale.id);
+
+      if (itemsError) throw itemsError;
+
+      // Generate invoice number
+      const invoicePrefix = settings?.sale_invoice_prefix || 'INV';
+      const invoiceNumber = settings?.sale_invoice_next_number || 1;
+      const invoiceNo = `${invoicePrefix}-${String(invoiceNumber).padStart(4, '0')}`;
+
+      // Create invoice
+      const invoiceData = {
+        user_id: userId,
+        invoice_no: invoiceNo,
+        order_id: sale.id,
+        customer_id: sale.customer_id,
+        customer_po: sale.customer_po,
+        invoice_date: new Date().toISOString().split('T')[0],
+        delivery_date: sale.delivery_date,
+        subtotal: sale.subtotal,
+        gst_percentage: sale.gst_percentage,
+        gst_amount: sale.gst_amount,
+        total_amount: sale.total_amount,
+        previous_balance: 0,
+        final_balance: sale.total_amount,
+        status: 'finalized',
+        bill_situation: sale.bill_situation,
+        box: sale.box,
+        notes: sale.notes,
+      };
+
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('sales_invoices')
+        .insert([invoiceData])
+        .select()
+        .single();
+
+      if (invoiceError) throw invoiceError;
+
+      // Create invoice items
+      const invoiceItemsData = orderItems.map(item => ({
+        user_id: userId,
+        invoice_id: invoice.id,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        total_price: item.total_price,
+        weight: item.weight,
+        net_weight: item.net_weight,
+      }));
+
+      const { error: itemsInsertError } = await supabase
+        .from('sales_invoice_items')
+        .insert(invoiceItemsData);
+
+      if (itemsInsertError) throw itemsInsertError;
+
+      // Update settings
+      await supabase
+        .from('settings')
+        .update({
+          sale_invoice_next_number: (settings?.sale_invoice_next_number || 1) + 1
+        })
+        .eq('user_id', userId);
+
+      notify.success('Sale order converted to invoice successfully!');
+
+      // Refresh settings and sales
+      await fetchSettings(userId);
+      await fetchSales(userId);
+    } catch (error) {
+      console.error('Error converting to invoice:', error);
+      notify.error('Error converting to invoice: ' + error.message);
+    }
+  }
+
   async function handleExportPDF() {
     try {
       const { generateSalesReportPDF } = await import('@/components/sales/InvoicePDF');
@@ -520,6 +604,7 @@ export default function SalesPage() {
                 <thead>
                   <tr className="bg-neutral-50">
                     <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Date</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Sale Order #</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Customer</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Customer PO</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-neutral-700">Subtotal</th>
@@ -532,6 +617,9 @@ export default function SalesPage() {
                     <tr key={sale.id} className="hover:bg-neutral-50 transition-colors">
                       <td className="py-3 px-4">
                         <span className="text-sm text-neutral-700">{formatDate(sale.order_date)}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm font-medium text-neutral-900">{sale.order_no || '-'}</span>
                       </td>
                       <td className="py-3 px-4">
                         <div className="text-sm font-medium text-neutral-900">
@@ -578,6 +666,16 @@ export default function SalesPage() {
                               <Edit3 className="w-4 h-4" />
                             </button>
                           )}
+                          <button
+                            onClick={() => handleConvertToInvoice(sale)}
+                            className={cn(
+                              "p-1.5 rounded-lg transition-colors",
+                              "text-neutral-600 hover:text-indigo-600 hover:bg-indigo-50"
+                            )}
+                            title="Convert to Invoice"
+                          >
+                            <Receipt className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => handleDownloadPDF(sale)}
                             className={cn(
