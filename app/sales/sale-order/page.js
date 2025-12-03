@@ -917,12 +917,10 @@ export default function NewSaleOrderPage() {
                   <thead className="bg-neutral-50/80">
                     <tr>
                       <th className="px-3 py-3 text-left font-medium text-neutral-600 w-8">#</th>
-                      <th className="px-3 py-3 text-left font-medium text-neutral-600" style={{ width: '28%' }}>Product</th>
+                      <th className="px-3 py-3 text-left font-medium text-neutral-600" style={{ width: '32%' }}>Product</th>
                       <th className="px-3 py-3 text-left font-medium text-neutral-600 w-24">Category</th>
                       <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">Unit</th>
                       <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">QTY</th>
-                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">Weight</th>
-                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-20">Net Wt.</th>
                       <th className="px-3 py-3 text-center font-medium text-neutral-600 w-20">Price</th>
                       <th className="px-3 py-3 text-right font-medium text-neutral-600 w-24">Amount</th>
                       <th className="px-2 py-3 w-10"></th>
@@ -966,12 +964,6 @@ export default function NewSaleOrderPage() {
                             )}
                             min="1"
                           />
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <span className="text-xs text-neutral-600 text-center block">{parseFloat(item.weight || 0).toFixed(2)}</span>
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <span className="text-xs font-medium text-neutral-700 text-center block">{(parseFloat(item.quantity || 0) * parseFloat(item.weight || 0)).toFixed(2)}</span>
                         </td>
                         <td className="px-2 py-2.5">
                           <input
@@ -1036,10 +1028,6 @@ export default function NewSaleOrderPage() {
               <div className="bg-neutral-900 rounded-xl p-3 text-center">
                 <div className="text-xs text-neutral-400 uppercase font-medium">Total</div>
                 <div className="text-sm font-semibold text-white mt-1">{formatCurrency(total)}</div>
-              </div>
-              <div className="bg-amber-50/80 border border-amber-200/60 rounded-xl p-3 text-center">
-                <div className="text-xs text-amber-600 uppercase font-medium">Net Weight</div>
-                <div className="text-sm font-semibold text-amber-700 mt-1">{totalNetWeight.toFixed(2)} kg</div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">Status</label>
@@ -1252,8 +1240,6 @@ export default function NewSaleOrderPage() {
                         <th className="px-4 py-3 text-left text-sm font-semibold">Product</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold">Unit</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold">Qty</th>
-                        <th className="px-4 py-3 text-center text-sm font-semibold">Weight</th>
-                        <th className="px-4 py-3 text-center text-sm font-semibold">Net Wt.</th>
                         <th className="px-4 py-3 text-right text-sm font-semibold">Price</th>
                         <th className="px-4 py-3 text-right text-sm font-semibold">Amount</th>
                       </tr>
@@ -1270,8 +1256,6 @@ export default function NewSaleOrderPage() {
                           </td>
                           <td className="px-4 py-3 text-center text-sm text-neutral-600">{item.unit || '-'}</td>
                           <td className="px-4 py-3 text-center text-sm text-neutral-700">{item.quantity}</td>
-                          <td className="px-4 py-3 text-center text-sm text-neutral-600">{parseFloat(item.weight || 0).toFixed(2)}</td>
-                          <td className="px-4 py-3 text-center text-sm text-neutral-700">{(parseFloat(item.quantity || 0) * parseFloat(item.weight || 0)).toFixed(2)}</td>
                           <td className="px-4 py-3 text-right text-sm text-neutral-700">Rs {formatCurrency(item.unit_price)}</td>
                           <td className="px-4 py-3 text-right text-sm font-semibold text-neutral-900">Rs {formatCurrency(item.quantity * item.unit_price)}</td>
                         </tr>
@@ -1290,10 +1274,6 @@ export default function NewSaleOrderPage() {
                     <div className="flex justify-between py-2 border-b border-neutral-200">
                       <span className="text-sm text-neutral-600">GST ({formData.gst_percentage}%)</span>
                       <span className="text-sm font-semibold text-blue-600">Rs {formatCurrency(gstAmount)}</span>
-                    </div>
-                    <div className="flex justify-between py-2 border-b border-neutral-200">
-                      <span className="text-sm text-neutral-600">Total Net Weight</span>
-                      <span className="text-sm font-semibold text-amber-600">{totalNetWeight.toFixed(2)} kg</span>
                     </div>
                     <div className="flex justify-between py-3 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg px-4 -mx-4">
                       <span className="text-sm font-semibold text-white">Total</span>
