@@ -71,31 +71,35 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
 
-  // Load images
+  // Load images (QR code removed from purchase orders - only used in sale orders)
   const images = {};
   if (showLogo && settings?.logo_url) images.logo = await getImageAsBase64(settings.logo_url, 200, 0.9);
-  if (settings?.qr_code_url) images.qr = await getImageAsBase64(settings.qr_code_url, 150, 0.9);
   if (settings?.signature_url) images.signature = await getImageAsBase64(settings.signature_url, 150, 0.9);
 
-  let totalQty = 0, totalTax = 0, totalAmount = 0;
+  let totalQty = 0, totalTax = 0, totalAmount = 0, totalNetWeight = 0;
   const getCategory = (item) => item.category || item.products?.categories?.name || '';
 
   // Store item data for custom rendering
   const itemsData = items.map((item, idx) => {
     const qty = item.quantity || 0;
     const price = item.unit_price || 0;
+    const weight = item.weight || 0;
+    const netWeight = qty * weight;
     const taxPercent = purchase.gst_percentage || 0;
     const taxAmt = (price * qty * taxPercent) / 100;
     const amount = (price * qty) + taxAmt;
     totalQty += qty;
     totalTax += taxAmt;
     totalAmount += amount;
+    totalNetWeight += netWeight;
     const category = getCategory(item);
     return {
       idx: idx + 1,
       productName: item.product_name,
       category: category,
       qty: qty,
+      weight: weight,
+      netWeight: netWeight,
       unit: item.unit || 'PCS',
       price: price,
       taxAmt: taxAmt,
@@ -122,8 +126,6 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
   doc.text(contact, centerX, y + 15, { align: 'center' });
   const tax = [settings?.ntn ? `NTN # ${settings.ntn}` : null, settings?.str ? `STR # ${settings.str}` : null].filter(Boolean).join('   ');
   if (tax) doc.text(tax, centerX, y + 21, { align: 'center' });
-
-  if (images.qr) try { doc.addImage(images.qr, 'JPEG', pageWidth - margin - 24, y, 24, 24); } catch (e) { }
 
   y += 30;
   doc.setDrawColor(0, 0, 0);
@@ -188,6 +190,8 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
     String(item.idx),
     '',
     String(item.qty),
+    item.weight.toFixed(2),
+    item.netWeight.toFixed(2),
     item.unit,
     item.price.toFixed(2),
     '',
@@ -196,9 +200,9 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
 
   autoTable(doc, {
     startY: y,
-    head: [['S.N', 'Item Name', 'Qty', 'Unit', 'Price', 'Tax', 'Amount']],
+    head: [['S.N', 'Item Name', 'Qty', 'Weight', 'Net Wt.', 'Unit', 'Price', 'Tax', 'Amount']],
     body: simpleTableBody,
-    foot: [['TOTAL', '', String(totalQty), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
+    foot: [['TOTAL', '', String(totalQty), '', totalNetWeight.toFixed(2), '', '', formatCurrency(totalTax), formatCurrency(totalAmount)]],
     theme: 'plain',
     headStyles: {
       fillColor: [255, 255, 255],
@@ -231,13 +235,15 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
       cellPadding: { top: 6, right: 0.75, bottom: 1, left: 0.75 },
     },
     columnStyles: {
-      0: { halign: 'center', cellWidth: 18 },
-      1: { halign: 'center', cellWidth: 52 },
-      2: { halign: 'center', cellWidth: 22 },
-      3: { halign: 'center', cellWidth: 22 },
-      4: { halign: 'center', cellWidth: 28 },
-      5: { halign: 'center', cellWidth: 25 },
-      6: { halign: 'center', cellWidth: 28 },
+      0: { halign: 'center', cellWidth: 14 },
+      1: { halign: 'center', cellWidth: 42 },
+      2: { halign: 'center', cellWidth: 18 },
+      3: { halign: 'center', cellWidth: 18 },
+      4: { halign: 'center', cellWidth: 20 },
+      5: { halign: 'center', cellWidth: 18 },
+      6: { halign: 'center', cellWidth: 22 },
+      7: { halign: 'center', cellWidth: 20 },
+      8: { halign: 'center', cellWidth: 23 },
     },
     tableWidth: 195,
     styles: { overflow: 'linebreak', cellPadding: 1.5 },
@@ -315,7 +321,7 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
           const topY = data.cell.y + 6;
           const bottomY = data.cell.y + 11;
 
-          doc.setFontSize(10);
+          doc.setFontSize(9);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
           doc.text(itemData.productName, cellCenterX, topY, { align: 'center' });
@@ -329,15 +335,15 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
         }
       }
 
-      // Custom rendering for Tax column (column 5) in body
-      if (data.section === 'body' && data.column.index === 5) {
+      // Custom rendering for Tax column (column 7) in body
+      if (data.section === 'body' && data.column.index === 7) {
         const itemData = itemsData[data.row.index];
         if (itemData) {
           const cellCenterX = data.cell.x + data.cell.width / 2;
           const topY = data.cell.y + 6;
           const bottomY = data.cell.y + 11;
 
-          doc.setFontSize(10);
+          doc.setFontSize(9);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(0, 0, 0);
           doc.text(formatCurrency(itemData.taxAmt), cellCenterX, topY, { align: 'center' });
@@ -383,11 +389,11 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
   finalY += 10;
 
   // Summary
-  const summaryLabels = ['ORDER AMOUNT', 'TAXABLE AMOUNT', 'RATE', 'TAX AMOUNT'];
+  const summaryLabels = ['ORDER AMOUNT', 'TAXABLE AMOUNT', 'RATE', 'TAX AMOUNT', 'NET WEIGHT'];
   const taxableAmount = totalAmount - totalTax;
-  const summaryValues = [formatCurrency(totalAmount), formatCurrency(taxableAmount), `${purchase.gst_percentage || 0}%`, formatCurrency(totalTax)];
-  const summaryColors = [[0,0,0], [0,123,255], [0,0,0], [220,53,69]];
-  const colW = (pageWidth - margin * 2) / 4;
+  const summaryValues = [formatCurrency(totalAmount), formatCurrency(taxableAmount), `${purchase.gst_percentage || 0}%`, formatCurrency(totalTax), `${totalNetWeight.toFixed(2)} kg`];
+  const summaryColors = [[0,0,0], [0,123,255], [0,0,0], [220,53,69], [180,130,0]];
+  const colW = (pageWidth - margin * 2) / 5;
 
   doc.setFontSize(9);
   summaryLabels.forEach((label, i) => {
@@ -453,15 +459,10 @@ export async function downloadPurchaseOrderPDF(purchase, items, settings, option
     const doc = await generatePurchaseOrderPDF(purchase, items, settings, options);
 
     if (shouldPrint) {
-      // Open PDF in new window and trigger print
+      // Open PDF in new window for preview
       const pdfBlob = doc.output('blob');
       const pdfUrl = URL.createObjectURL(pdfBlob);
-      const printWindow = window.open(pdfUrl, '_blank');
-      if (printWindow) {
-        printWindow.onload = () => {
-          printWindow.print();
-        };
-      }
+      window.open(pdfUrl, '_blank');
     } else {
       doc.save(`PO-${purchase.po_no}.pdf`);
     }

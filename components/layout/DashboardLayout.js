@@ -3,10 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import ToastProvider from '@/components/ui/ToastProvider';
 import { Menu } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 
 export default function DashboardLayout({ children }) {
@@ -21,7 +19,6 @@ export default function DashboardLayout({ children }) {
     }
     return null;
   });
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     checkAuth();
@@ -56,8 +53,6 @@ export default function DashboardLayout({ children }) {
     } catch (error) {
       console.error('Auth check error:', error);
       router.push('/login');
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -84,7 +79,7 @@ export default function DashboardLayout({ children }) {
 
         {/* Page Content */}
         <main className="p-3 lg:p-4">
-          {isLoading ? <PageSkeleton /> : children}
+          {children}
         </main>
       </div>
     </div>

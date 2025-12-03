@@ -50,9 +50,11 @@ export default function PaymentHistoryPage() {
       const data = await response.json();
       if (data.success && data.user) {
         setUser(data.user);
-        fetchCustomers(data.user.id);
-        fetchSuppliers(data.user.id);
-        fetchPayments(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        fetchCustomers(dataUserId);
+        fetchSuppliers(dataUserId);
+        fetchPayments(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);

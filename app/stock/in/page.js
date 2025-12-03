@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
+import { Loader2 } from 'lucide-react';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
 import AddProductModal from '@/components/ui/AddProductModal';
 import AddSupplierModal from '@/components/ui/AddSupplierModal';
@@ -48,7 +48,8 @@ export default function StockInPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        await fetchData(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        await fetchData(data.user.parentUserId || data.user.id);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -251,7 +252,7 @@ export default function StockInPage() {
 
     try {
       const stockInRecords = validItems.map(item => ({
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         date: formData.date,
         product_id: parseInt(item.product_id),
         warehouse_id: formData.warehouse_id ? parseInt(formData.warehouse_id) : null,
@@ -262,7 +263,7 @@ export default function StockInPage() {
         reference_no: formData.reference_no,
         supplier_id: formData.supplier_id ? parseInt(formData.supplier_id) : null,
         notes: formData.notes,
-        created_by: user.id,
+        created_by: user.parentUserId || user.id,
       }));
 
       const { error } = await supabase.from('stock_in').insert(stockInRecords);
@@ -305,14 +306,6 @@ export default function StockInPage() {
   const warehouseOptions = warehouses.map(w => ({ value: w.id.toString(), label: w.name }));
   const productOptions = products.map(p => ({ value: p.id.toString(), label: `${p.name} (Stock: ${p.current_stock || 0})` }));
 
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
-
   return (
     <DashboardLayout>
       <div className="space-y-4">
@@ -322,7 +315,7 @@ export default function StockInPage() {
           <p className="text-sm text-neutral-500">Add stock to inventory</p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} autoComplete="off">
           <div className={cn(
             "bg-white rounded-xl",
             "border border-neutral-200",

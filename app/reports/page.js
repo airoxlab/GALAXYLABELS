@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
@@ -69,9 +69,11 @@ export default function ReportsPage() {
       const data = await response.json();
       if (data.success && data.user) {
         setUser(data.user);
-        fetchCustomers(data.user.id);
-        fetchSuppliers(data.user.id);
-        fetchSettings(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        fetchCustomers(dataUserId);
+        fetchSuppliers(dataUserId);
+        fetchSettings(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -1684,19 +1686,19 @@ export default function ReportsPage() {
 
         {/* Sale Tax Invoice Report - PENDING */}
         <div className={cn(
-          "bg-white/80 backdrop-blur-xl rounded-xl",
+          "bg-white/80 backdrop-blur-xl rounded-2xl",
           "border border-neutral-200/60",
           "shadow-[0_2px_10px_rgba(0,0,0,0.03)]",
-          "p-4 opacity-50"
+          "px-6 py-8 opacity-50"
         )}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-neutral-100 rounded-lg flex items-center justify-center">
-                <FileText className="w-4 h-4 text-neutral-500" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-neutral-100 rounded-xl flex items-center justify-center">
+                <FileText className="w-6 h-6 text-neutral-500" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-neutral-900">Sale Tax Invoices Report</h3>
+                  <h3 className="text-lg font-semibold text-neutral-900">Sale Tax Invoices Report</h3>
                   <span className={cn(
                     "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium",
                     "bg-amber-100 text-amber-700 border border-amber-200"
@@ -1705,15 +1707,17 @@ export default function ReportsPage() {
                     PENDING
                   </span>
                 </div>
-                <p className="text-[10px] text-neutral-500">This report is coming soon</p>
+                <p className="text-xs text-neutral-500 mt-1">This report is coming soon</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button disabled className="px-3 py-1.5 text-xs font-medium text-neutral-400 bg-neutral-100 rounded-lg cursor-not-allowed">
-                <Eye className="w-4 h-4" />
+            <div className="flex items-center gap-3">
+              <button disabled className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-neutral-400 bg-neutral-100 rounded-lg cursor-not-allowed">
+                <Eye className="w-4.5 h-4.5" />
+                View
               </button>
-              <button disabled className="px-3 py-1.5 text-xs font-medium text-neutral-400 bg-neutral-100 rounded-lg cursor-not-allowed">
-                <FileDown className="w-4 h-4" />
+              <button disabled className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-neutral-400 bg-neutral-100 rounded-lg cursor-not-allowed">
+                <FileDown className="w-4.5 h-4.5" />
+                Download
               </button>
             </div>
           </div>
@@ -1795,41 +1799,41 @@ export default function ReportsPage() {
 function ReportCard({ icon, title, children, loading, onView, onDownload, iconColor = "bg-blue-500" }) {
   return (
     <div className={cn(
-      "bg-white/80 backdrop-blur-xl rounded-xl",
+      "bg-white/80 backdrop-blur-xl rounded-2xl",
       "border border-neutral-200/60",
       "shadow-[0_2px_10px_rgba(0,0,0,0.03)]",
-      "p-4"
+      "px-6 py-8"
     )}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center text-white", iconColor)}>
-            {icon}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-4">
+          <div className={cn("w-14 h-14 rounded-xl flex items-center justify-center text-white", iconColor)}>
+            {React.cloneElement(icon, { className: "w-6 h-6" })}
           </div>
-          <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
+          <h3 className="text-lg font-semibold text-neutral-900">{title}</h3>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <button
             onClick={onView}
             disabled={loading}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all",
+              "flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg transition-all",
               "bg-neutral-100 text-neutral-700 hover:bg-neutral-200",
               loading && "opacity-50 cursor-not-allowed"
             )}
           >
-            <Eye className="w-4 h-4" />
+            <Eye className="w-4.5 h-4.5" />
             View
           </button>
           <button
             onClick={onDownload}
             disabled={loading}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all",
+              "flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg transition-all",
               "bg-neutral-900 text-white hover:bg-neutral-800",
               loading && "opacity-50 cursor-not-allowed"
             )}
           >
-            <FileDown className="w-4 h-4" />
+            <FileDown className="w-4.5 h-4.5" />
             Download
           </button>
         </div>

@@ -1,18 +1,23 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, Save, FileText, X, Edit3, Clock, Download, Receipt, Printer, Eye } from 'lucide-react';
+import { Plus, Trash2, Save, FileText, X, Download, Receipt, Printer, Eye, Loader2 } from 'lucide-react';
+import { useDraftsPanel } from '@/components/ui/DraftsPanel';
 import { downloadInvoicePDF, downloadSaleOrderPDF } from '@/components/sales/InvoicePDF';
 import AddProductModal from '@/components/ui/AddProductModal';
 import AddCustomerModal from '@/components/ui/AddCustomerModal';
+import { usePermissions } from '@/hooks/usePermissions';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 export default function NewSaleOrderPage() {
+  const router = useRouter();
+  const { hasPermission, isSuperadmin } = usePermissions();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [customers, setCustomers] = useState([]);
@@ -21,13 +26,16 @@ export default function NewSaleOrderPage() {
   const [user, setUser] = useState(null);
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [drafts, setDrafts] = useState([]);
-  const [showDrafts, setShowDrafts] = useState(false);
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [addProductIndex, setAddProductIndex] = useState(null);
   const [addProductInitialName, setAddProductInitialName] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [addCustomerInitialName, setAddCustomerInitialName] = useState('');
+
+  // Permission checks for add actions
+  const canAddProduct = isSuperadmin || hasPermission('products_add');
+  const canAddCustomer = isSuperadmin || hasPermission('customers_add');
 
   const [formData, setFormData] = useState({
     order_no: '',
@@ -36,8 +44,9 @@ export default function NewSaleOrderPage() {
     order_date: new Date().toISOString().split('T')[0],
     delivery_date: new Date().toISOString().split('T')[0],
     gst_percentage: 18,
-    bill_situation: 'pending',
-    items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 }],
+    bill_situation: 'credit',
+    box: '',
+    items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' }],
     special_note: '',
   });
 
@@ -51,14 +60,16 @@ export default function NewSaleOrderPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        await fetchData(data.user.id);
-        await fetchSettings(data.user.id);
-        await fetchDrafts(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        await fetchData(dataUserId);
+        await fetchSettings(dataUserId);
+        await fetchDrafts(dataUserId);
 
         const urlParams = new URLSearchParams(window.location.search);
         const editId = urlParams.get('edit');
         if (editId) {
-          await loadOrderForEdit(editId, data.user.id);
+          await loadOrderForEdit(editId, dataUserId);
         }
       }
     } catch (error) {
@@ -102,10 +113,17 @@ export default function NewSaleOrderPage() {
             id,
             name,
             unit_price,
+            weight,
             category_id,
+            unit_id,
             categories (
               id,
               name
+            ),
+            units (
+              id,
+              name,
+              symbol
             )
           `)
           .eq('user_id', userId)
@@ -187,7 +205,7 @@ export default function NewSaleOrderPage() {
 
       const { data: items } = await supabase
         .from('sale_order_items')
-        .select('*, products(categories(name))')
+        .select('*, products(categories(name), units(symbol, name))')
         .eq('order_id', orderId);
 
       const loadedItems = items.length > 0 ? items.map(item => ({
@@ -196,11 +214,13 @@ export default function NewSaleOrderPage() {
         category: item.products?.categories?.name || '',
         quantity: item.quantity || 1,
         unit_price: item.unit_price || 0,
+        weight: item.weight || 0,
+        unit: item.unit || item.products?.units?.symbol || item.products?.units?.name || '',
       })) : [];
 
       // Fill remaining slots to maintain minimum rows
       while (loadedItems.length < 1) {
-        loadedItems.push({ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 });
+        loadedItems.push({ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' });
       }
 
       setFormData(prev => ({
@@ -211,7 +231,8 @@ export default function NewSaleOrderPage() {
         order_date: order.order_date,
         delivery_date: order.delivery_date || new Date().toISOString().split('T')[0],
         gst_percentage: order.gst_percentage || 18,
-        bill_situation: order.bill_situation || 'pending',
+        bill_situation: order.bill_situation || 'credit',
+        box: order.box || '',
         items: loadedItems,
         special_note: order.notes || '',
       }));
@@ -241,6 +262,8 @@ export default function NewSaleOrderPage() {
         product_name: product.name,
         category: product.categories?.name || '',
         unit_price: product.unit_price || 0,
+        weight: product.weight || 0,
+        unit: product.units?.symbol || product.units?.name || '',
       };
     } else {
       newItems[index] = {
@@ -249,6 +272,8 @@ export default function NewSaleOrderPage() {
         product_name: '',
         category: '',
         unit_price: 0,
+        weight: 0,
+        unit: '',
       };
     }
     setFormData(prev => ({ ...prev, items: newItems }));
@@ -278,7 +303,7 @@ export default function NewSaleOrderPage() {
   const addItem = () => {
     setFormData(prev => ({
       ...prev,
-      items: [...prev.items, { product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 }]
+      items: [...prev.items, { product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' }]
     }));
   };
 
@@ -297,17 +322,20 @@ export default function NewSaleOrderPage() {
     }, 0);
     const gstAmount = (subtotal * parseFloat(formData.gst_percentage || 0)) / 100;
     const total = subtotal + gstAmount;
-    return { subtotal, gstAmount, total };
+    const totalNetWeight = formData.items.reduce((sum, item) => {
+      return sum + (parseFloat(item.quantity || 0) * parseFloat(item.weight || 0));
+    }, 0);
+    return { subtotal, gstAmount, total, totalNetWeight };
   };
 
-  const { subtotal, gstAmount, total } = calculateTotals();
+  const { subtotal, gstAmount, total, totalNetWeight } = calculateTotals();
 
   async function handleQuickAddCustomer(name) {
     if (!name.trim() || !user) return;
     try {
       const { data, error } = await supabase
         .from('customers')
-        .insert([{ user_id: user.id, customer_name: name.trim(), is_active: true, current_balance: 0 }])
+        .insert([{ user_id: user.parentUserId || user.id, customer_name: name.trim(), is_active: true, current_balance: 0 }])
         .select()
         .single();
 
@@ -331,7 +359,7 @@ export default function NewSaleOrderPage() {
     try {
       const { data, error } = await supabase
         .from('products')
-        .insert([{ user_id: user.id, name: name.trim(), is_active: true, unit_price: 0, current_stock: 0 }])
+        .insert([{ user_id: user.parentUserId || user.id, name: name.trim(), is_active: true, unit_price: 0, current_stock: 0 }])
         .select('id, name, unit_price, categories(name)')
         .single();
 
@@ -423,9 +451,9 @@ export default function NewSaleOrderPage() {
     setSaving(true);
 
     try {
-      // Create/Update Sale Order
+      // Create/Update Sale Order - use parentUserId for data queries
       const orderData = {
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         order_no: formData.order_no,
         customer_id: parseInt(formData.customer_id),
         customer_po: formData.customer_po,
@@ -437,6 +465,7 @@ export default function NewSaleOrderPage() {
         total_amount: total,
         status: saveAs,
         bill_situation: formData.bill_situation,
+        box: formData.box || null,
         notes: formData.special_note,
       };
 
@@ -473,13 +502,15 @@ export default function NewSaleOrderPage() {
 
       // Insert order items
       const orderItemsData = validItems.map(item => ({
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         order_id: order.id,
         product_id: parseInt(item.product_id),
         product_name: item.product_name,
         quantity: parseFloat(item.quantity),
         unit_price: parseFloat(item.unit_price),
         total_price: parseFloat(item.quantity) * parseFloat(item.unit_price),
+        weight: parseFloat(item.weight) || 0,
+        net_weight: parseFloat(item.quantity) * parseFloat(item.weight || 0),
       }));
 
       // Insert order items
@@ -493,8 +524,8 @@ export default function NewSaleOrderPage() {
 
       // Update customer balance and create ledger entry for finalized orders
       if (saveAs === 'finalized') {
-        // Only update customer balance if adding to account
-        if (formData.bill_situation === 'added_to_account') {
+        // Only update customer balance if credit (customer owes money)
+        if (formData.bill_situation === 'credit') {
           parallelOperations.push(
             supabase
               .from('customers')
@@ -502,7 +533,7 @@ export default function NewSaleOrderPage() {
               .eq('id', formData.customer_id)
           );
         } else {
-          // For pending orders, just update last order date without changing balance
+          // For cash orders (paid), just update last order date without changing balance
           parallelOperations.push(
             supabase
               .from('customers')
@@ -512,20 +543,20 @@ export default function NewSaleOrderPage() {
         }
 
         // Create ledger entry for ALL finalized orders (regardless of bill_situation)
-        // Use balance based on bill_situation: if pending, balance doesn't change
-        const ledgerBalance = formData.bill_situation === 'added_to_account' ? finalBalance : previousBalance;
+        // Use balance based on bill_situation: if cash, balance doesn't change
+        const ledgerBalance = formData.bill_situation === 'credit' ? finalBalance : previousBalance;
         parallelOperations.push(
           supabase.from('customer_ledger').insert([{
-            user_id: user.id,
+            user_id: user.parentUserId || user.id,
             customer_id: parseInt(formData.customer_id),
             transaction_type: 'sale_order',
             transaction_date: formData.order_date,
             reference_id: order.id,
             reference_no: formData.order_no,
-            debit: formData.bill_situation === 'added_to_account' ? total : 0,
+            debit: formData.bill_situation === 'credit' ? total : 0,
             credit: 0,
             balance: ledgerBalance,
-            description: `Sale Order ${formData.order_no}${formData.bill_situation === 'pending' ? ' (Pending)' : ''}`,
+            description: `Sale Order ${formData.order_no}${formData.bill_situation === 'cash' ? ' (Cash)' : ''}`,
           }])
         );
       }
@@ -533,7 +564,7 @@ export default function NewSaleOrderPage() {
       // Auto-deduct stock for finalized orders
       if (saveAs === 'finalized') {
         const stockOutRecords = validItems.map(item => ({
-          user_id: user.id,
+          user_id: user.parentUserId || user.id,
           date: formData.order_date,
           product_id: parseInt(item.product_id),
           warehouse_id: null,
@@ -542,7 +573,7 @@ export default function NewSaleOrderPage() {
           reference_no: formData.order_no,
           customer_id: parseInt(formData.customer_id),
           notes: `Auto-generated from Sale Order ${formData.order_no}`,
-          created_by: user.id,
+          created_by: user.parentUserId || user.id,
         }));
 
         parallelOperations.push(
@@ -558,7 +589,7 @@ export default function NewSaleOrderPage() {
             .update({
                 sale_order_next_number: (settings.sale_order_next_number || 1) + 1
               })
-              .eq('user_id', user.id)
+              .eq('user_id', user.parentUserId || user.id)
           );
       }
 
@@ -595,8 +626,8 @@ export default function NewSaleOrderPage() {
 
       // Reset form and refresh data
       resetForm();
-      fetchDrafts(user.id);
-      fetchSettings(user.id);
+      fetchDrafts(user.parentUserId || user.id);
+      fetchSettings(user.parentUserId || user.id);
     } catch (error) {
       console.error('Error:', error);
       toast.error(error.message, {
@@ -657,8 +688,9 @@ export default function NewSaleOrderPage() {
       order_date: new Date().toISOString().split('T')[0],
       delivery_date: new Date().toISOString().split('T')[0],
       gst_percentage: 18,
-      bill_situation: 'pending',
-      items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 }],
+      bill_situation: 'credit',
+      box: '',
+      items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' }],
       special_note: '',
     });
     setEditingOrderId(null);
@@ -667,6 +699,18 @@ export default function NewSaleOrderPage() {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
   };
+
+  // Drafts panel hook
+  const { ToggleButton: DraftsToggle, Panel: DraftsPanel } = useDraftsPanel({
+    drafts,
+    onEdit: (id) => loadOrderForEdit(id, user?.parentUserId || user?.id),
+    onDelete: handleDeleteDraft,
+    formatCurrency,
+    type: 'sale',
+    orderNoField: 'order_no',
+    entityField: 'customers',
+    entityNameField: 'customer_name',
+  });
 
   // Preview function
   function handlePreview() {
@@ -697,15 +741,8 @@ export default function NewSaleOrderPage() {
   const customerOptions = customers.map(c => ({ value: c.id.toString(), label: c.customer_name }));
   const productOptions = products.map(p => ({ value: p.id.toString(), label: p.name }));
 
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
-
   return (
+    <ProtectedRoute requiredPermission="sales_order_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-4">
         {/* Header */}
@@ -716,64 +753,30 @@ export default function NewSaleOrderPage() {
             </h1>
             <p className="text-sm text-neutral-500">Create a new sale order with invoice</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowDrafts(!showDrafts)}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-medium",
-              "border border-neutral-200/60",
-              "transition-all duration-200",
-              "flex items-center gap-1.5",
-              showDrafts ? "bg-neutral-900 text-white" : "bg-white text-neutral-700 hover:bg-neutral-50"
-            )}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            Drafts ({drafts.length})
-          </button>
+          <div className="flex items-center gap-2">
+            {DraftsToggle}
+            <button
+              type="button"
+              onClick={() => router.push('/sales')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium",
+                "bg-gradient-to-br from-neutral-800 to-neutral-900 text-white",
+                "hover:from-neutral-700 hover:to-neutral-800",
+                "transition-all duration-200",
+                "flex items-center gap-1.5"
+              )}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              History
+            </button>
+          </div>
         </div>
 
         {/* Drafts Section */}
-        {showDrafts && drafts.length > 0 && (
-          <div className={cn(
-            "bg-white/80 backdrop-blur-xl rounded-xl",
-            "border border-neutral-200/60",
-            "shadow-[0_4px_20px_rgba(0,0,0,0.04)]",
-            "p-3"
-          )}>
-            <h3 className="text-xs font-semibold text-neutral-700 mb-2">Saved Drafts</h3>
-            <div className="space-y-1.5 max-h-40 overflow-y-auto">
-              {drafts.map(draft => (
-                <div key={draft.id} className="flex items-center justify-between p-2 bg-neutral-50/80 rounded-lg">
-                  <div className="flex-1">
-                    <div className="text-xs font-medium text-neutral-900">{draft.order_no}</div>
-                    <div className="text-[10px] text-neutral-500">
-                      {draft.customers?.customer_name || 'No customer'} • {formatCurrency(draft.total_amount)}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => loadOrderForEdit(draft.id, user.id)}
-                      className="p-1 text-neutral-500 hover:text-neutral-900 rounded transition-all"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteDraft(draft.id)}
-                      className="p-1 text-neutral-500 hover:text-red-500 rounded transition-all"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {DraftsPanel}
 
         {/* Form */}
-        <form onSubmit={(e) => handleSubmit(e, 'finalized', true)}>
+        <form onSubmit={(e) => handleSubmit(e, 'finalized', true)} autoComplete="off">
           <div className={cn(
             "bg-white/80 backdrop-blur-xl rounded-xl",
             "border border-neutral-200/60",
@@ -781,7 +784,7 @@ export default function NewSaleOrderPage() {
             "p-5"
           )}>
             {/* Top Fields */}
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
+            <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-5">
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">Order #</label>
                 <input
@@ -799,7 +802,7 @@ export default function NewSaleOrderPage() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">Customer *</label>
                 <SearchableDropdown
                   options={customerOptions}
@@ -807,10 +810,10 @@ export default function NewSaleOrderPage() {
                   onChange={(val) => setFormData(prev => ({ ...prev, customer_id: val }))}
                   placeholder="Select Customer"
                   searchPlaceholder="Search customer..."
-                  onQuickAdd={handleQuickAddCustomer}
-                  quickAddLabel="Add customer"
-                  onOpenAddModal={handleOpenAddCustomerModal}
-                  addModalLabel="Add New Customer"
+                  onQuickAdd={canAddCustomer ? handleQuickAddCustomer : undefined}
+                  quickAddLabel={canAddCustomer ? "Add customer" : undefined}
+                  onOpenAddModal={canAddCustomer ? handleOpenAddCustomerModal : undefined}
+                  addModalLabel={canAddCustomer ? "Add New Customer" : undefined}
                 />
               </div>
 
@@ -821,6 +824,23 @@ export default function NewSaleOrderPage() {
                   name="customer_po"
                   value={formData.customer_po}
                   onChange={handleChange}
+                  className={cn(
+                    "w-full px-3 py-2.5 text-sm",
+                    "bg-neutral-50/80 border border-neutral-200/60 rounded-lg",
+                    "focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
+                    "transition-all duration-200"
+                  )}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-1.5">Box</label>
+                <input
+                  type="text"
+                  name="box"
+                  value={formData.box}
+                  onChange={handleChange}
+                  placeholder="Optional"
                   className={cn(
                     "w-full px-3 py-2.5 text-sm",
                     "bg-neutral-50/80 border border-neutral-200/60 rounded-lg",
@@ -874,11 +894,14 @@ export default function NewSaleOrderPage() {
                   <thead className="bg-neutral-50/80">
                     <tr>
                       <th className="px-3 py-3 text-left font-medium text-neutral-600 w-8">#</th>
-                      <th className="px-3 py-3 text-left font-medium text-neutral-600" style={{ width: '40%' }}>Product</th>
-                      <th className="px-3 py-3 text-left font-medium text-neutral-600 w-32">Category</th>
-                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-24">QTY</th>
-                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-28">Price</th>
-                      <th className="px-3 py-3 text-right font-medium text-neutral-600 w-32">Amount</th>
+                      <th className="px-3 py-3 text-left font-medium text-neutral-600" style={{ width: '28%' }}>Product</th>
+                      <th className="px-3 py-3 text-left font-medium text-neutral-600 w-24">Category</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">Unit</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">QTY</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">Weight</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-20">Net Wt.</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-20">Price</th>
+                      <th className="px-3 py-3 text-right font-medium text-neutral-600 w-24">Amount</th>
                       <th className="px-2 py-3 w-10"></th>
                     </tr>
                   </thead>
@@ -893,16 +916,19 @@ export default function NewSaleOrderPage() {
                             onChange={(val) => handleProductChange(index, val)}
                             placeholder="Select Product"
                             searchPlaceholder="Search product..."
-                            onQuickAdd={(name) => handleQuickAddProduct(name, index)}
-                            quickAddLabel="Add product"
+                            onQuickAdd={canAddProduct ? (name) => handleQuickAddProduct(name, index) : undefined}
+                            quickAddLabel={canAddProduct ? "Add product" : undefined}
                             allowClear={false}
                             className="text-sm"
-                            onOpenAddModal={(searchQuery) => handleOpenAddProductModal(searchQuery, index)}
-                            addModalLabel="Add New Product"
+                            onOpenAddModal={canAddProduct ? (searchQuery) => handleOpenAddProductModal(searchQuery, index) : undefined}
+                            addModalLabel={canAddProduct ? "Add New Product" : undefined}
                           />
                         </td>
                         <td className="px-3 py-2.5">
                           <span className="text-xs text-neutral-500 truncate block">{item.category || '-'}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <span className="text-xs text-neutral-600 text-center block">{item.unit || '-'}</span>
                         </td>
                         <td className="px-2 py-2.5">
                           <input
@@ -910,7 +936,7 @@ export default function NewSaleOrderPage() {
                             value={item.quantity}
                             onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
                             className={cn(
-                              "w-full px-2.5 py-2 text-sm text-center",
+                              "w-full px-2 py-2 text-sm text-center",
                               "bg-white border border-neutral-200/60 rounded-lg",
                               "focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
                               "transition-all duration-200"
@@ -919,12 +945,18 @@ export default function NewSaleOrderPage() {
                           />
                         </td>
                         <td className="px-2 py-2.5">
+                          <span className="text-xs text-neutral-600 text-center block">{parseFloat(item.weight || 0).toFixed(2)}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <span className="text-xs font-medium text-neutral-700 text-center block">{(parseFloat(item.quantity || 0) * parseFloat(item.weight || 0)).toFixed(2)}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
                           <input
                             type="number"
                             value={item.unit_price}
                             onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
                             className={cn(
-                              "w-full px-2.5 py-2 text-sm text-center",
+                              "w-full px-2 py-2 text-sm text-center",
                               "bg-white border border-neutral-200/60 rounded-lg",
                               "focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
                               "transition-all duration-200"
@@ -969,7 +1001,7 @@ export default function NewSaleOrderPage() {
             </div>
 
             {/* Totals & Actions */}
-            <div className="grid grid-cols-7 gap-3 mb-5">
+            <div className="grid grid-cols-5 gap-3 mb-5">
               <div className="bg-neutral-50/80 border border-neutral-200/60 rounded-xl p-3 text-center">
                 <div className="text-xs text-neutral-500 uppercase font-medium">Subtotal</div>
                 <div className="text-sm font-semibold text-neutral-900 mt-1">{formatCurrency(subtotal)}</div>
@@ -982,20 +1014,9 @@ export default function NewSaleOrderPage() {
                 <div className="text-xs text-neutral-400 uppercase font-medium">Total</div>
                 <div className="text-sm font-semibold text-white mt-1">{formatCurrency(total)}</div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-neutral-700 mb-1.5">Delivery</label>
-                <input
-                  type="date"
-                  name="delivery_date"
-                  value={formData.delivery_date}
-                  onChange={handleChange}
-                  className={cn(
-                    "w-full px-3 py-2.5 text-sm",
-                    "bg-neutral-50/80 border border-neutral-200/60 rounded-lg",
-                    "focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
-                    "transition-all duration-200"
-                  )}
-                />
+              <div className="bg-amber-50/80 border border-amber-200/60 rounded-xl p-3 text-center">
+                <div className="text-xs text-amber-600 uppercase font-medium">Net Weight</div>
+                <div className="text-sm font-semibold text-amber-700 mt-1">{totalNetWeight.toFixed(2)} kg</div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">Status</label>
@@ -1010,8 +1031,8 @@ export default function NewSaleOrderPage() {
                     "transition-all duration-200"
                   )}
                 >
-                  <option value="pending">Pending</option>
-                  <option value="added_to_account">Add to Account</option>
+                  <option value="cash">Cash</option>
+                  <option value="credit">Credit</option>
                 </select>
               </div>
             </div>
@@ -1034,7 +1055,7 @@ export default function NewSaleOrderPage() {
               />
             </div>
 
-            {/* Action Buttons - 5 buttons */}
+            {/* Action Buttons */}
             <div className="flex gap-2">
               <button
                 type="button"
@@ -1055,7 +1076,7 @@ export default function NewSaleOrderPage() {
               </button>
               <button
                 type="button"
-                onClick={(e) => handleSubmit(e, 'finalized', false, true)}
+                onClick={(e) => handleSubmit(e, 'finalized', true, true)}
                 disabled={saving}
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-xl font-medium text-sm",
@@ -1071,7 +1092,8 @@ export default function NewSaleOrderPage() {
                 {saving ? 'Saving...' : 'Save & Print'}
               </button>
               <button
-                type="submit"
+                type="button"
+                onClick={(e) => handleSubmit(e, 'finalized', false)}
                 disabled={saving}
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-xl font-medium text-sm",
@@ -1083,24 +1105,8 @@ export default function NewSaleOrderPage() {
                   "flex items-center justify-center gap-2"
                 )}
               >
-                <Download className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Save & Download'}
-              </button>
-              <button
-                type="button"
-                onClick={(e) => handleSubmit(e, 'finalized', false)}
-                disabled={saving}
-                className={cn(
-                  "flex-1 px-3 py-2.5 rounded-xl font-medium text-sm",
-                  "bg-neutral-900 text-white",
-                  "hover:bg-neutral-800",
-                  "transition-all duration-200",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
-                  "flex items-center justify-center gap-2"
-                )}
-              >
                 <Save className="w-4 h-4" />
-                Save Order
+                {saving ? 'Saving...' : 'Save Order'}
               </button>
               <button
                 type="button"
@@ -1221,7 +1227,10 @@ export default function NewSaleOrderPage() {
                       <tr>
                         <th className="px-4 py-3 text-left text-sm font-semibold">#</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold">Product</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold">Unit</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold">Qty</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold">Weight</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold">Net Wt.</th>
                         <th className="px-4 py-3 text-right text-sm font-semibold">Price</th>
                         <th className="px-4 py-3 text-right text-sm font-semibold">Amount</th>
                       </tr>
@@ -1236,7 +1245,10 @@ export default function NewSaleOrderPage() {
                               <div className="text-xs text-neutral-500">{item.category}</div>
                             )}
                           </td>
+                          <td className="px-4 py-3 text-center text-sm text-neutral-600">{item.unit || '-'}</td>
                           <td className="px-4 py-3 text-center text-sm text-neutral-700">{item.quantity}</td>
+                          <td className="px-4 py-3 text-center text-sm text-neutral-600">{parseFloat(item.weight || 0).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-center text-sm text-neutral-700">{(parseFloat(item.quantity || 0) * parseFloat(item.weight || 0)).toFixed(2)}</td>
                           <td className="px-4 py-3 text-right text-sm text-neutral-700">Rs {formatCurrency(item.unit_price)}</td>
                           <td className="px-4 py-3 text-right text-sm font-semibold text-neutral-900">Rs {formatCurrency(item.quantity * item.unit_price)}</td>
                         </tr>
@@ -1247,7 +1259,7 @@ export default function NewSaleOrderPage() {
 
                 {/* Totals */}
                 <div className="flex justify-end">
-                  <div className="w-72 space-y-2">
+                  <div className="w-80 space-y-2">
                     <div className="flex justify-between py-2 border-b border-neutral-200">
                       <span className="text-sm text-neutral-600">Subtotal</span>
                       <span className="text-sm font-semibold text-neutral-900">Rs {formatCurrency(subtotal)}</span>
@@ -1255,6 +1267,10 @@ export default function NewSaleOrderPage() {
                     <div className="flex justify-between py-2 border-b border-neutral-200">
                       <span className="text-sm text-neutral-600">GST ({formData.gst_percentage}%)</span>
                       <span className="text-sm font-semibold text-blue-600">Rs {formatCurrency(gstAmount)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-neutral-200">
+                      <span className="text-sm text-neutral-600">Total Net Weight</span>
+                      <span className="text-sm font-semibold text-amber-600">{totalNetWeight.toFixed(2)} kg</span>
                     </div>
                     <div className="flex justify-between py-3 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-lg px-4 -mx-4">
                       <span className="text-sm font-semibold text-white">Total</span>
@@ -1307,5 +1323,6 @@ export default function NewSaleOrderPage() {
         </div>
       )}
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

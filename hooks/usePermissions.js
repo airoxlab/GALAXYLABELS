@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/lib/AuthContext';
+import { useCallback } from 'react';
 
 /**
  * Hook to check if user has specific permission
@@ -15,40 +16,27 @@ export function usePermissions() {
    * @param {string} permissionKey - The permission key to check (e.g., 'sales_invoice_view')
    * @returns {boolean} - True if user has permission, false otherwise
    */
-  const hasPermission = (permissionKey) => {
-    console.log(`hasPermission("${permissionKey}")`, {
-      userType,
-      isSuperadmin,
-      isStaff,
-      permissionsExist: !!permissions,
-      requestedPermission: permissionKey,
-      permissionValue: permissions?.[permissionKey]
-    });
-
+  const hasPermission = useCallback((permissionKey) => {
     // Simple logic: superadmin from users table = all permissions
     if (userType === 'superadmin') {
-      console.log(`  → TRUE (superadmin from users table)`);
       return true;
     }
 
     // Staff from staff table = check specific permission
     if (userType === 'staff' && permissions) {
-      const hasIt = permissions[permissionKey] === true;
-      console.log(`  → ${hasIt ? 'TRUE' : 'FALSE'} (staff - ${permissionKey}: ${permissions[permissionKey]})`);
-      return hasIt;
+      return permissions[permissionKey] === true;
     }
 
     // Not logged in or no permissions loaded
-    console.log(`  → FALSE (not authenticated or no permissions)`);
     return false;
-  };
+  }, [userType, permissions]);
 
   /**
    * Check if user has any of the specified permissions
    * @param {string[]} permissionKeys - Array of permission keys
    * @returns {boolean} - True if user has at least one permission
    */
-  const hasAnyPermission = (permissionKeys) => {
+  const hasAnyPermission = useCallback((permissionKeys) => {
     if (isSuperadmin) {
       return true;
     }
@@ -58,14 +46,14 @@ export function usePermissions() {
     }
 
     return false;
-  };
+  }, [isSuperadmin, isStaff, permissions]);
 
   /**
    * Check if user has all of the specified permissions
    * @param {string[]} permissionKeys - Array of permission keys
    * @returns {boolean} - True if user has all permissions
    */
-  const hasAllPermissions = (permissionKeys) => {
+  const hasAllPermissions = useCallback((permissionKeys) => {
     if (isSuperadmin) {
       return true;
     }
@@ -75,43 +63,43 @@ export function usePermissions() {
     }
 
     return false;
-  };
+  }, [isSuperadmin, isStaff, permissions]);
 
   /**
    * Check if user can view a specific page/feature
    * @param {string} feature - Feature name (e.g., 'sales_invoice', 'products')
    * @returns {boolean}
    */
-  const canView = (feature) => {
+  const canView = useCallback((feature) => {
     return hasPermission(`${feature}_view`);
-  };
+  }, [hasPermission]);
 
   /**
    * Check if user can add to a specific feature
    * @param {string} feature - Feature name
    * @returns {boolean}
    */
-  const canAdd = (feature) => {
+  const canAdd = useCallback((feature) => {
     return hasPermission(`${feature}_add`);
-  };
+  }, [hasPermission]);
 
   /**
    * Check if user can edit a specific feature
    * @param {string} feature - Feature name
    * @returns {boolean}
    */
-  const canEdit = (feature) => {
+  const canEdit = useCallback((feature) => {
     return hasPermission(`${feature}_edit`);
-  };
+  }, [hasPermission]);
 
   /**
    * Check if user can delete from a specific feature
    * @param {string} feature - Feature name
    * @returns {boolean}
    */
-  const canDelete = (feature) => {
+  const canDelete = useCallback((feature) => {
     return hasPermission(`${feature}_delete`);
-  };
+  }, [hasPermission]);
 
   return {
     hasPermission,

@@ -24,11 +24,19 @@ import {
   Tag,
   DollarSign
 } from 'lucide-react';
+import { usePermissions } from '@/hooks/usePermissions';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 export default function ProductsPage() {
   const router = useRouter();
+  const { hasPermission, isSuperadmin } = usePermissions();
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
   const [products, setProducts] = useState([]);
+
+  // Permission checks
+  const canAddProduct = isSuperadmin || hasPermission('products_add');
+  const canEditProduct = isSuperadmin || hasPermission('products_edit');
+  const canDeleteProduct = isSuperadmin || hasPermission('products_delete');
   const [categories, setCategories] = useState([]);
   const [units, setUnits] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,10 +63,12 @@ export default function ProductsPage() {
       });
       const data = await response.json();
       if (data.success && data.user) {
-        setUserId(data.user.id);
-        fetchProducts(data.user.id);
-        fetchCategories(data.user.id);
-        fetchUnits(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        setUserId(dataUserId);
+        fetchProducts(dataUserId);
+        fetchCategories(dataUserId);
+        fetchUnits(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -332,6 +342,7 @@ export default function ProductsPage() {
   };
 
   return (
+    <ProtectedRoute requiredPermission="products_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-4">
         {/* Header */}
@@ -358,20 +369,22 @@ export default function ProductsPage() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleAddNew}
-              className={cn(
-                "px-4 py-2 rounded-xl font-medium text-sm",
-                "bg-gradient-to-br from-violet-500 to-purple-600 text-white",
-                "shadow-lg shadow-violet-500/20",
-                "hover:from-violet-600 hover:to-purple-700",
-                "transition-all duration-200",
-                "flex items-center gap-2"
-              )}
-            >
-              <Plus className="w-4 h-4" />
-              Add Product
-            </button>
+            {canAddProduct && (
+              <button
+                onClick={handleAddNew}
+                className={cn(
+                  "px-4 py-2 rounded-xl font-medium text-sm",
+                  "bg-gradient-to-br from-violet-500 to-purple-600 text-white",
+                  "shadow-lg shadow-violet-500/20",
+                  "hover:from-violet-600 hover:to-purple-700",
+                  "transition-all duration-200",
+                  "flex items-center gap-2"
+                )}
+              >
+                <Plus className="w-4 h-4" />
+                Add Product
+              </button>
+            )}
           </div>
         </div>
 
@@ -546,20 +559,24 @@ export default function ProductsPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleEdit(product)}
-                            className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                            title="Edit product"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(product.id)}
-                            className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                            title="Delete product"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canEditProduct && (
+                            <button
+                              onClick={() => handleEdit(product)}
+                              className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                              title="Edit product"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDeleteProduct && (
+                            <button
+                              onClick={() => handleDelete(product.id)}
+                              className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                              title="Delete product"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -764,26 +781,29 @@ export default function ProductsPage() {
                 >
                   Close
                 </button>
-                <button
-                  onClick={() => {
-                    setShowViewModal(false);
-                    handleEdit(selectedProduct);
-                  }}
-                  className={cn(
-                    "px-4 py-2 rounded-lg text-sm font-medium",
-                    "bg-gradient-to-br from-amber-500 to-orange-600 text-white",
-                    "hover:from-amber-600 hover:to-orange-700 transition-all",
-                    "flex items-center gap-2"
-                  )}
-                >
-                  <Edit3 className="w-4 h-4" />
-                  Edit Product
-                </button>
+                {canEditProduct && (
+                  <button
+                    onClick={() => {
+                      setShowViewModal(false);
+                      handleEdit(selectedProduct);
+                    }}
+                    className={cn(
+                      "px-4 py-2 rounded-lg text-sm font-medium",
+                      "bg-gradient-to-br from-amber-500 to-orange-600 text-white",
+                      "hover:from-amber-600 hover:to-orange-700 transition-all",
+                      "flex items-center gap-2"
+                    )}
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    Edit Product
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

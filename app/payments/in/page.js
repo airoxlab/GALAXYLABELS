@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import Card, { CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -11,7 +12,7 @@ import Textarea from '@/components/ui/Textarea';
 import { formatCurrency } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { notify } from '@/components/ui/Notifications';
-import { Download } from 'lucide-react';
+import { Download, History } from 'lucide-react';
 
 export default function PaymentInPage() {
   const router = useRouter();
@@ -51,10 +52,12 @@ export default function PaymentInPage() {
       const response = await fetch('/api/auth/me', { credentials: 'include' });
       const data = await response.json();
       if (data.success && data.user) {
-        setUserId(data.user.id);
-        fetchCustomers(data.user.id);
-        fetchSettings(data.user.id);
-        generateReceiptNo(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        setUserId(dataUserId);
+        fetchCustomers(dataUserId);
+        fetchSettings(dataUserId);
+        generateReceiptNo(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -272,23 +275,34 @@ export default function PaymentInPage() {
   };
 
   return (
+    <ProtectedRoute requiredPermission="payments_in_add" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => router.back()}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </Button>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Payment In</h1>
-            <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 mt-1">
-              Receive payment from customer
-            </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" onClick={() => router.back()}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </Button>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Payment In</h1>
+              <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 mt-1">
+                Receive payment from customer
+              </p>
+            </div>
           </div>
+          <Button
+            variant="secondary"
+            onClick={() => router.push('/payments/history')}
+            className="flex items-center gap-2"
+          >
+            <History className="w-4 h-4" />
+            History
+          </Button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off">
           <Card>
             <CardHeader>
               <CardTitle>Payment Details</CardTitle>
@@ -484,5 +498,6 @@ export default function PaymentInPage() {
         </form>
       </div>
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

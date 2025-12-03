@@ -3,11 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-import { Package, Search, AlertTriangle, TrendingUp, TrendingDown, ArrowDownToLine, RefreshCw, X, Plus, Download, FileText } from 'lucide-react';
+import { Package, Search, AlertTriangle, TrendingUp, TrendingDown, ArrowDownToLine, RefreshCw, X, Plus, Download, FileText, Loader2 } from 'lucide-react';
 import QuantityCounter from '@/components/ui/QuantityCounter';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -48,7 +47,8 @@ export default function StockAvailabilityPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        await fetchData(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        await fetchData(data.user.parentUserId || data.user.id);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -650,7 +650,7 @@ export default function StockAvailabilityPage() {
       const unitCost = parseFloat(stockInForm.unit_cost) || 0;
 
       const { error } = await supabase.from('stock_in').insert({
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         product_id: selectedProduct.id,
         quantity: quantity,
         unit_cost: unitCost,
@@ -658,7 +658,7 @@ export default function StockAvailabilityPage() {
         reference_type: 'purchase',
         notes: stockInForm.notes || `Quick stock in for ${selectedProduct.name}`,
         date: new Date().toISOString().split('T')[0],
-        created_by: user.id
+        created_by: user.parentUserId || user.id
       });
 
       if (error) throw error;
@@ -680,8 +680,6 @@ export default function StockAvailabilityPage() {
       setSavingStockIn(false);
     }
   };
-
-  if (loading) return <DashboardLayout><PageSkeleton /></DashboardLayout>;
 
   return (
     <DashboardLayout>
@@ -959,7 +957,7 @@ export default function StockAvailabilityPage() {
               </button>
             </div>
 
-            <form onSubmit={handleStockIn} className="flex-1 p-4 flex flex-col">
+            <form onSubmit={handleStockIn} className="flex-1 p-4 flex flex-col" autoComplete="off">
               <div className="space-y-4 flex-1">
                 {/* Product Info */}
                 <div className="bg-neutral-50 rounded-lg p-4">

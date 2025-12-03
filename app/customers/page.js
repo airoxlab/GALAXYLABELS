@@ -32,12 +32,20 @@ import {
   DollarSign,
   UserCheck
 } from 'lucide-react';
+import { usePermissions } from '@/hooks/usePermissions';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 export default function CustomersPage() {
   const router = useRouter();
+  const { hasPermission, isSuperadmin } = usePermissions();
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
   const [customers, setCustomers] = useState([]);
   const [editingCustomer, setEditingCustomer] = useState(null);
+
+  // Permission checks
+  const canAddCustomer = isSuperadmin || hasPermission('customers_add');
+  const canEditCustomer = isSuperadmin || hasPermission('customers_edit');
+  const canDeleteCustomer = isSuperadmin || hasPermission('customers_delete');
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -61,8 +69,10 @@ export default function CustomersPage() {
       });
       const data = await response.json();
       if (data.success && data.user) {
-        setUserId(data.user.id);
-        fetchCustomers(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        setUserId(dataUserId);
+        fetchCustomers(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -291,6 +301,7 @@ export default function CustomersPage() {
   };
 
   return (
+    <ProtectedRoute requiredPermission="customers_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-3">
         {/* Header */}
@@ -317,20 +328,22 @@ export default function CustomersPage() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleAddNew}
-              className={cn(
-                "px-4 py-2 rounded-xl font-medium text-sm",
-                "bg-gradient-to-br from-blue-500 to-indigo-600 text-white",
-                "shadow-lg shadow-blue-500/20",
-                "hover:from-blue-600 hover:to-indigo-700",
-                "transition-all duration-200",
-                "flex items-center gap-2"
-              )}
-            >
-              <Plus className="w-4 h-4" />
-              Add Customer
-            </button>
+            {canAddCustomer && (
+              <button
+                onClick={handleAddNew}
+                className={cn(
+                  "px-4 py-2 rounded-xl font-medium text-sm",
+                  "bg-gradient-to-br from-blue-500 to-indigo-600 text-white",
+                  "shadow-lg shadow-blue-500/20",
+                  "hover:from-blue-600 hover:to-indigo-700",
+                  "transition-all duration-200",
+                  "flex items-center gap-2"
+                )}
+              >
+                <Plus className="w-4 h-4" />
+                Add Customer
+              </button>
+            )}
 
             {/* Export Button */}
             <div className="relative">
@@ -562,20 +575,24 @@ export default function CustomersPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleEdit(customer)}
-                            className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                            title="Edit customer"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(customer.id)}
-                            className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                            title="Delete customer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canEditCustomer && (
+                            <button
+                              onClick={() => handleEdit(customer)}
+                              className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                              title="Edit customer"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDeleteCustomer && (
+                            <button
+                              onClick={() => handleDelete(customer.id)}
+                              className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                              title="Delete customer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -836,18 +853,20 @@ export default function CustomersPage() {
 
             {/* Footer Actions */}
             <div className="p-4 border-t border-neutral-200 flex gap-2">
-              <button
-                onClick={handleEditFromView}
-                className={cn(
-                  "flex-1 py-2.5 rounded-lg font-medium text-sm",
-                  "bg-neutral-900 text-white",
-                  "hover:bg-neutral-800",
-                  "flex items-center justify-center gap-2 transition-colors"
-                )}
-              >
-                <Edit3 className="w-4 h-4" />
-                Edit Customer
-              </button>
+              {canEditCustomer && (
+                <button
+                  onClick={handleEditFromView}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-lg font-medium text-sm",
+                    "bg-neutral-900 text-white",
+                    "hover:bg-neutral-800",
+                    "flex items-center justify-center gap-2 transition-colors"
+                  )}
+                >
+                  <Edit3 className="w-4 h-4" />
+                  Edit Customer
+                </button>
+              )}
               <button
                 onClick={() => router.push(`/customers/${viewingCustomer.id}`)}
                 className={cn(
@@ -865,5 +884,6 @@ export default function CustomersPage() {
         </>
       )}
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

@@ -121,7 +121,7 @@ export default function LoginPage() {
           )}
 
           {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5" autoComplete="off">
             {/* Username Field */}
             <div>
               <label className="block text-sm font-medium text-neutral-700 mb-1.5">

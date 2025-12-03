@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -19,6 +18,7 @@ import {
   X,
   Eye,
   EyeOff,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -67,7 +67,7 @@ export default function StaffManagementPage() {
           *,
           staff_permissions (*)
         `)
-        .eq('user_id', currentUser.id)
+        .eq('user_id', currentUser.parentUserId || currentUser.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -96,11 +96,11 @@ export default function StaffManagementPage() {
     setSaving(true);
 
     try {
-      // Insert staff member
+      // Insert staff member - use parentUserId for data queries
       const { data: newStaff, error } = await supabase
         .from('staff')
         .insert([{
-          user_id: currentUser.id,
+          user_id: currentUser.parentUserId || currentUser.id,
           name: formData.name,
           email: formData.email,
           phone: formData.phone || null,
@@ -244,14 +244,6 @@ export default function StaffManagementPage() {
     setSelectedStaff(staffMember);
     setShowPermissionsModal(true);
   };
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>
@@ -477,7 +469,7 @@ function StaffFormModal({ title, formData, setFormData, showPassword, setShowPas
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="p-4 space-y-3">
+        <form onSubmit={onSubmit} className="p-4 space-y-3" autoComplete="off">
           <div>
             <label className="block text-[10px] font-medium text-neutral-700 mb-1">
               Name *

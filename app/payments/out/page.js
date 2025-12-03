@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import Card, { CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -10,6 +11,7 @@ import Button from '@/components/ui/Button';
 import Textarea from '@/components/ui/Textarea';
 import { formatCurrency } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
+import { History } from 'lucide-react';
 
 export default function PaymentOutPage() {
   const router = useRouter();
@@ -49,9 +51,11 @@ export default function PaymentOutPage() {
       const data = await response.json();
       if (data.success && data.user) {
         setUser(data.user);
-        fetchSuppliers(data.user.id);
-        fetchSettings(data.user.id);
-        generateReceiptNo(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        fetchSuppliers(dataUserId);
+        fetchSettings(dataUserId);
+        generateReceiptNo(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -143,9 +147,9 @@ export default function PaymentOutPage() {
       const previousBalance = selectedSupplier?.current_balance || 0;
       const newBalance = previousBalance - amount;
 
-      // Insert payment
+      // Insert payment - use parentUserId for data queries
       const paymentData = {
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         receipt_no: formData.receipt_no,
         payment_date: formData.date,
         supplier_id: parseInt(formData.supplier_id),
@@ -187,7 +191,7 @@ export default function PaymentOutPage() {
 
       // Add to supplier ledger
       await supabase.from('supplier_ledger').insert([{
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         supplier_id: parseInt(formData.supplier_id),
         transaction_type: 'payment',
         transaction_date: formData.date,
@@ -219,23 +223,34 @@ export default function PaymentOutPage() {
   };
 
   return (
+    <ProtectedRoute requiredPermission="payments_out_add" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => router.back()}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </Button>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Payment Out</h1>
-            <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 mt-1">
-              Make payment to supplier
-            </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" onClick={() => router.back()}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </Button>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Payment Out</h1>
+              <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 mt-1">
+                Make payment to supplier
+              </p>
+            </div>
           </div>
+          <Button
+            variant="secondary"
+            onClick={() => router.push('/payments/history')}
+            className="flex items-center gap-2"
+          >
+            <History className="w-4 h-4" />
+            History
+          </Button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off">
           <Card>
             <CardHeader>
               <CardTitle>Payment Details</CardTitle>
@@ -404,5 +419,6 @@ export default function PaymentOutPage() {
         </form>
       </div>
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

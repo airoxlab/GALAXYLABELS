@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
@@ -11,7 +10,7 @@ import { notify } from '@/components/ui/Notifications';
 import {
   Download, ChevronLeft, ChevronRight, Search, X,
   Building2, TrendingDown, FileText, DollarSign,
-  CheckCircle, Clock, AlertTriangle
+  CheckCircle, Clock, AlertTriangle, Loader2
 } from 'lucide-react';
 import { downloadSupplierLedgerPDF } from '@/components/ledgers/SupplierLedgerPDF';
 
@@ -43,7 +42,8 @@ export default function SupplierLedgerPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        const userId = data.user.id || data.user.userId;
+        // Use parentUserId for data queries (staff sees parent account data)
+        const userId = data.user.parentUserId || data.user.id || data.user.userId;
         fetchSuppliers(userId);
         fetchSettings(userId);
       }
@@ -288,14 +288,6 @@ export default function SupplierLedgerPage() {
   const totalSuppliers = suppliers.length;
   const totalPayable = suppliers.reduce((sum, s) => sum + (parseFloat(s.current_balance) || 0), 0);
   const suppliersWithBalance = suppliers.filter(s => (parseFloat(s.current_balance) || 0) > 0).length;
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>

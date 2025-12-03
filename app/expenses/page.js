@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { usePermissions } from '@/hooks/usePermissions';
 import ExpenseDrawer from '@/components/expenses/ExpenseDrawer';
 import CategoryDrawer from '@/components/expenses/CategoryDrawer';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -76,10 +78,12 @@ export default function ExpensesPage() {
       });
       const data = await response.json();
       if (data.success && data.user) {
-        setUserId(data.user.id);
-        fetchExpenses(data.user.id);
-        fetchCategories(data.user.id);
-        fetchSettings(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        setUserId(dataUserId);
+        fetchExpenses(dataUserId);
+        fetchCategories(dataUserId);
+        fetchSettings(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -788,6 +792,7 @@ export default function ExpensesPage() {
   };
 
   return (
+    <ProtectedRoute requiredPermission="expenses_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-3">
         {/* Header */}
@@ -1369,5 +1374,6 @@ export default function ExpensesPage() {
         </div>
       )}
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

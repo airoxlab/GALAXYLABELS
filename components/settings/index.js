@@ -3,3 +3,5 @@ export { default as CompanyInfoSection } from './CompanyInfoSection';
 export { default as InvoicePrefixSection } from './InvoicePrefixSection';
 export { default as CurrencySection } from './CurrencySection';
 export { default as AccountSection } from './AccountSection';
+export { default as UnitsSection } from './UnitsSection';
+export { default as CategoriesSection } from './CategoriesSection';

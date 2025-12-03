@@ -143,6 +143,7 @@ export default function SearchableDropdown({
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={searchPlaceholder}
+            autoComplete="off"
             className={cn(
               'w-full pl-9 pr-3',
               compact ? 'py-1' : 'py-2.5',

@@ -116,7 +116,7 @@ export default function NewSupplierPage() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off">
           <Card>
             <CardHeader>
               <CardTitle>Basic Information</CardTitle>

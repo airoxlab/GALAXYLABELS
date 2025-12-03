@@ -29,9 +29,12 @@ import {
   DollarSign,
   UserCheck
 } from 'lucide-react';
+import { usePermissions } from '@/hooks/usePermissions';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 export default function SuppliersPage() {
   const router = useRouter();
+  const { hasPermission, isSuperadmin } = usePermissions();
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
   const [suppliers, setSuppliers] = useState([]);
   const [editingSupplier, setEditingSupplier] = useState(null);
@@ -41,6 +44,11 @@ export default function SuppliersPage() {
   const [userId, setUserId] = useState(null);
   const [viewingSupplier, setViewingSupplier] = useState(null);
   const [showViewSidebar, setShowViewSidebar] = useState(false);
+
+  // Permission checks
+  const canAddSupplier = isSuperadmin || hasPermission('suppliers_add');
+  const canEditSupplier = isSuperadmin || hasPermission('suppliers_edit');
+  const canDeleteSupplier = isSuperadmin || hasPermission('suppliers_delete');
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -57,8 +65,10 @@ export default function SuppliersPage() {
       });
       const data = await response.json();
       if (data.success && data.user) {
-        setUserId(data.user.id);
-        fetchSuppliers(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        setUserId(dataUserId);
+        fetchSuppliers(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -277,6 +287,7 @@ export default function SuppliersPage() {
   };
 
   return (
+    <ProtectedRoute requiredPermission="suppliers_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-3">
         {/* Header */}
@@ -303,20 +314,22 @@ export default function SuppliersPage() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleAddNew}
-              className={cn(
-                "px-4 py-2 rounded-xl font-medium text-sm",
-                "bg-gradient-to-br from-emerald-500 to-teal-600 text-white",
-                "shadow-lg shadow-emerald-500/20",
-                "hover:from-emerald-600 hover:to-teal-700",
-                "transition-all duration-200",
-                "flex items-center gap-2"
-              )}
-            >
-              <Plus className="w-4 h-4" />
-              Add Supplier
-            </button>
+            {canAddSupplier && (
+              <button
+                onClick={handleAddNew}
+                className={cn(
+                  "px-4 py-2 rounded-xl font-medium text-sm",
+                  "bg-gradient-to-br from-emerald-500 to-teal-600 text-white",
+                  "shadow-lg shadow-emerald-500/20",
+                  "hover:from-emerald-600 hover:to-teal-700",
+                  "transition-all duration-200",
+                  "flex items-center gap-2"
+                )}
+              >
+                <Plus className="w-4 h-4" />
+                Add Supplier
+              </button>
+            )}
           </div>
         </div>
 
@@ -500,20 +513,24 @@ export default function SuppliersPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleEdit(supplier)}
-                            className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                            title="Edit supplier"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(supplier.id)}
-                            className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                            title="Delete supplier"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canEditSupplier && (
+                            <button
+                              onClick={() => handleEdit(supplier)}
+                              className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                              title="Edit supplier"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDeleteSupplier && (
+                            <button
+                              onClick={() => handleDelete(supplier.id)}
+                              className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                              title="Delete supplier"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -774,18 +791,20 @@ export default function SuppliersPage() {
 
             {/* Footer Actions */}
             <div className="p-4 border-t border-neutral-200 flex gap-2">
-              <button
-                onClick={handleEditFromView}
-                className={cn(
-                  "flex-1 py-2.5 rounded-lg font-medium text-sm",
-                  "bg-neutral-900 text-white",
-                  "hover:bg-neutral-800",
-                  "flex items-center justify-center gap-2 transition-colors"
-                )}
-              >
-                <Edit3 className="w-4 h-4" />
-                Edit Supplier
-              </button>
+              {canEditSupplier && (
+                <button
+                  onClick={handleEditFromView}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-lg font-medium text-sm",
+                    "bg-neutral-900 text-white",
+                    "hover:bg-neutral-800",
+                    "flex items-center justify-center gap-2 transition-colors"
+                  )}
+                >
+                  <Edit3 className="w-4 h-4" />
+                  Edit Supplier
+                </button>
+              )}
               <button
                 onClick={() => router.push(`/suppliers/${viewingSupplier.id}`)}
                 className={cn(
@@ -803,5 +822,6 @@ export default function SuppliersPage() {
         </>
       )}
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

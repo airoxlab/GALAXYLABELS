@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
@@ -11,8 +10,10 @@ import InvoiceViewModal from '@/components/sales/InvoiceViewModal';
 import InvoiceEditModal from '@/components/sales/InvoiceEditModal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { notify, useConfirm } from '@/components/ui/Notifications';
-import { Download, Eye, Search, X, FileText, ChevronLeft, ChevronRight, Edit3, Trash2, FileSpreadsheet, Printer, TrendingUp, Calendar, Receipt } from 'lucide-react';
+import { Download, Eye, Search, X, FileText, ChevronLeft, ChevronRight, Edit3, Trash2, FileSpreadsheet, Printer, TrendingUp, Calendar, Receipt, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export default function InvoiceHistoryPage() {
   const router = useRouter();
@@ -33,6 +34,11 @@ export default function InvoiceHistoryPage() {
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
   const itemsPerPage = 15;
 
+  // Permission checks
+  const { hasPermission, isSuperadmin } = usePermissions();
+  const canEditInvoice = isSuperadmin || hasPermission('sales_invoice_edit');
+  const canDeleteInvoice = isSuperadmin || hasPermission('sales_invoice_delete');
+
   useEffect(() => {
     fetchUser();
   }, []);
@@ -43,7 +49,8 @@ export default function InvoiceHistoryPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        const userId = data.user.id || data.user.userId;
+        // Use parentUserId for data queries (staff sees parent account data)
+        const userId = data.user.parentUserId || data.user.id || data.user.userId;
         fetchData(userId);
       }
     } catch (error) {
@@ -313,15 +320,8 @@ export default function InvoiceHistoryPage() {
     ...customers.map(c => ({ value: c.id.toString(), label: c.customer_name }))
   ];
 
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
-
   return (
+    <ProtectedRoute requiredPermission="sales_invoice_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-4">
         {/* Header */}
@@ -597,16 +597,18 @@ export default function InvoiceHistoryPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleEditInvoice(invoice.id)}
-                            className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              "text-neutral-600 hover:text-amber-600 hover:bg-amber-50"
-                            )}
-                            title="Edit invoice"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
+                          {canEditInvoice && (
+                            <button
+                              onClick={() => handleEditInvoice(invoice.id)}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-amber-600 hover:bg-amber-50"
+                              )}
+                              title="Edit invoice"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleDownloadPDF(invoice)}
                             className={cn(
@@ -627,16 +629,18 @@ export default function InvoiceHistoryPage() {
                           >
                             <Printer className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleDeleteInvoice(invoice.id, invoice.invoice_no)}
-                            className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              "text-neutral-600 hover:text-red-600 hover:bg-red-50"
-                            )}
-                            title="Delete invoice"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canDeleteInvoice && (
+                            <button
+                              onClick={() => handleDeleteInvoice(invoice.id, invoice.invoice_no)}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-red-600 hover:bg-red-50"
+                              )}
+                              title="Delete invoice"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -735,5 +739,6 @@ export default function InvoiceHistoryPage() {
         cancelText="Cancel"
       />
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

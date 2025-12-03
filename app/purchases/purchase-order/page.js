@@ -2,17 +2,22 @@
 
 import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, Save, FileText, X, Edit3, Clock, Download, Printer, Eye } from 'lucide-react';
+import { Plus, Trash2, Save, FileText, X, Download, Printer, Eye, Loader2, History } from 'lucide-react';
+import { useDraftsPanel } from '@/components/ui/DraftsPanel';
+import { useRouter } from 'next/navigation';
 import { downloadPurchaseOrderPDF } from '@/components/purchases/PurchasePDF';
 import AddProductModal from '@/components/ui/AddProductModal';
 import AddSupplierModal from '@/components/ui/AddSupplierModal';
+import { usePermissions } from '@/hooks/usePermissions';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 export default function NewPurchaseOrderPage() {
+  const router = useRouter();
+  const { hasPermission, isSuperadmin } = usePermissions();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [suppliers, setSuppliers] = useState([]);
@@ -21,7 +26,6 @@ export default function NewPurchaseOrderPage() {
   const [user, setUser] = useState(null);
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [drafts, setDrafts] = useState([]);
-  const [showDrafts, setShowDrafts] = useState(false);
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [addProductIndex, setAddProductIndex] = useState(null);
   const [addProductInitialName, setAddProductInitialName] = useState('');
@@ -29,16 +33,20 @@ export default function NewPurchaseOrderPage() {
   const [addSupplierInitialName, setAddSupplierInitialName] = useState('');
   const [showPreview, setShowPreview] = useState(false);
 
+  // Permission checks for add actions
+  const canAddProduct = isSuperadmin || hasPermission('products_add');
+  const canAddSupplier = isSuperadmin || hasPermission('suppliers_add');
+
   const [formData, setFormData] = useState({
     po_no: '',
     supplier_id: '',
     po_date: new Date().toISOString().split('T')[0],
     receiving_date: new Date().toISOString().split('T')[0],
     currency_code: 'PKR',
-    is_gst: true,
-    gst_percentage: 17,
+    is_gst: false,
+    gst_percentage: 0,
     status: 'pending',
-    items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 }],
+    items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' }],
     notes: '',
   });
 
@@ -52,14 +60,16 @@ export default function NewPurchaseOrderPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        await fetchData(data.user.id);
-        await fetchSettings(data.user.id);
-        await fetchDrafts(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        await fetchData(dataUserId);
+        await fetchSettings(dataUserId);
+        await fetchDrafts(dataUserId);
 
         const urlParams = new URLSearchParams(window.location.search);
         const editId = urlParams.get('edit');
         if (editId) {
-          await loadOrderForEdit(editId, data.user.id);
+          await loadOrderForEdit(editId, dataUserId);
         }
       }
     } catch (error) {
@@ -96,10 +106,17 @@ export default function NewPurchaseOrderPage() {
             id,
             name,
             unit_price,
+            weight,
             category_id,
+            unit_id,
             categories (
               id,
               name
+            ),
+            units (
+              id,
+              name,
+              symbol
             )
           `)
           .eq('user_id', userId)
@@ -181,7 +198,7 @@ export default function NewPurchaseOrderPage() {
 
       const { data: items } = await supabase
         .from('purchase_order_items')
-        .select('*, products(categories(name))')
+        .select('*, products(categories(name), units(symbol, name))')
         .eq('po_id', orderId);
 
       const loadedItems = items.length > 0 ? items.map(item => ({
@@ -190,11 +207,13 @@ export default function NewPurchaseOrderPage() {
         category: item.products?.categories?.name || '',
         quantity: item.quantity || 1,
         unit_price: item.unit_price || 0,
+        weight: item.weight || 0,
+        unit: item.unit || item.products?.units?.symbol || item.products?.units?.name || '',
       })) : [];
 
       // Fill remaining slots to maintain minimum rows
       while (loadedItems.length < 1) {
-        loadedItems.push({ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 });
+        loadedItems.push({ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' });
       }
 
       setFormData({
@@ -235,6 +254,8 @@ export default function NewPurchaseOrderPage() {
         product_name: product.name,
         category: product.categories?.name || '',
         unit_price: product.unit_price || 0,
+        weight: product.weight || 0,
+        unit: product.units?.symbol || product.units?.name || '',
       };
     } else {
       newItems[index] = {
@@ -243,6 +264,8 @@ export default function NewPurchaseOrderPage() {
         product_name: '',
         category: '',
         unit_price: 0,
+        weight: 0,
+        unit: '',
       };
     }
     setFormData(prev => ({ ...prev, items: newItems }));
@@ -272,7 +295,7 @@ export default function NewPurchaseOrderPage() {
   const addItem = () => {
     setFormData(prev => ({
       ...prev,
-      items: [...prev.items, { product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 }]
+      items: [...prev.items, { product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' }]
     }));
   };
 
@@ -291,17 +314,20 @@ export default function NewPurchaseOrderPage() {
     }, 0);
     const gstAmount = formData.is_gst ? (subtotal * parseFloat(formData.gst_percentage || 0)) / 100 : 0;
     const total = subtotal + gstAmount;
-    return { subtotal, gstAmount, total };
+    const totalNetWeight = formData.items.reduce((sum, item) => {
+      return sum + (parseFloat(item.quantity || 0) * parseFloat(item.weight || 0));
+    }, 0);
+    return { subtotal, gstAmount, total, totalNetWeight };
   };
 
-  const { subtotal, gstAmount, total } = calculateTotals();
+  const { subtotal, gstAmount, total, totalNetWeight } = calculateTotals();
 
   async function handleQuickAddSupplier(name) {
     if (!name.trim() || !user) return;
     try {
       const { data, error } = await supabase
         .from('suppliers')
-        .insert([{ user_id: user.id, supplier_name: name.trim(), is_active: true, current_balance: 0 }])
+        .insert([{ user_id: user.parentUserId || user.id, supplier_name: name.trim(), is_active: true, current_balance: 0 }])
         .select()
         .single();
 
@@ -325,7 +351,7 @@ export default function NewPurchaseOrderPage() {
     try {
       const { data, error } = await supabase
         .from('products')
-        .insert([{ user_id: user.id, name: name.trim(), is_active: true, unit_price: 0, current_stock: 0 }])
+        .insert([{ user_id: user.parentUserId || user.id, name: name.trim(), is_active: true, unit_price: 0, current_stock: 0 }])
         .select('id, name, unit_price, categories(name)')
         .single();
 
@@ -442,9 +468,9 @@ export default function NewPurchaseOrderPage() {
     setSaving(true);
 
     try {
-      // Create/Update Purchase Order
+      // Create/Update Purchase Order - use parentUserId for data queries
       const orderData = {
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         po_no: formData.po_no,
         supplier_id: parseInt(formData.supplier_id),
         po_date: formData.po_date,
@@ -498,13 +524,15 @@ export default function NewPurchaseOrderPage() {
 
       // Insert order items
       const orderItemsData = validItems.map(item => ({
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         po_id: order.id,
         product_id: parseInt(item.product_id),
         product_name: item.product_name,
         quantity: parseFloat(item.quantity),
         unit_price: parseFloat(item.unit_price),
         total_price: parseFloat(item.quantity) * parseFloat(item.unit_price),
+        weight: parseFloat(item.weight) || 0,
+        net_weight: parseFloat(item.quantity) * parseFloat(item.weight || 0),
       }));
 
       // Update supplier balance and ledger if not a draft
@@ -530,7 +558,7 @@ export default function NewPurchaseOrderPage() {
         // Insert supplier ledger
         parallelOperations.push(
           supabase.from('supplier_ledger').insert([{
-            user_id: user.id,
+            user_id: user.parentUserId || user.id,
             supplier_id: parseInt(formData.supplier_id),
             transaction_type: 'po',
             transaction_date: formData.po_date,
@@ -545,7 +573,7 @@ export default function NewPurchaseOrderPage() {
 
         // Auto-add stock for each product
         const stockInRecords = validItems.map(item => ({
-          user_id: user.id,
+          user_id: user.parentUserId || user.id,
           date: formData.receiving_date || formData.po_date,
           product_id: parseInt(item.product_id),
           warehouse_id: null,
@@ -556,7 +584,7 @@ export default function NewPurchaseOrderPage() {
           reference_no: formData.po_no,
           supplier_id: parseInt(formData.supplier_id),
           notes: `Auto-generated from Purchase Order ${formData.po_no}`,
-          created_by: user.id,
+          created_by: user.parentUserId || user.id,
         }));
 
         parallelOperations.push(
@@ -571,7 +599,7 @@ export default function NewPurchaseOrderPage() {
               .update({
                 purchase_order_next_number: (settings.purchase_order_next_number || 1) + 1
               })
-              .eq('user_id', user.id)
+              .eq('user_id', user.parentUserId || user.id)
           );
         }
 
@@ -598,7 +626,7 @@ export default function NewPurchaseOrderPage() {
             .update({
               purchase_order_next_number: (settings.purchase_order_next_number || 1) + 1
             })
-            .eq('user_id', user.id);
+            .eq('user_id', user.parentUserId || user.id);
         }
       }
 
@@ -618,8 +646,8 @@ export default function NewPurchaseOrderPage() {
 
       // Reset form and refresh data
       resetForm();
-      fetchDrafts(user.id);
-      fetchSettings(user.id);
+      fetchDrafts(user.parentUserId || user.id);
+      fetchSettings(user.parentUserId || user.id);
     } catch (error) {
       console.error('Error:', error);
       toast.error(error.message, {
@@ -679,10 +707,10 @@ export default function NewPurchaseOrderPage() {
       po_date: new Date().toISOString().split('T')[0],
       receiving_date: new Date().toISOString().split('T')[0],
       currency_code: 'PKR',
-      is_gst: true,
-      gst_percentage: 17,
+      is_gst: false,
+      gst_percentage: 0,
       status: 'pending',
-      items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0 }],
+      items: [{ product_id: '', product_name: '', category: '', quantity: 1, unit_price: 0, weight: 0, unit: '' }],
       notes: '',
     });
     setEditingOrderId(null);
@@ -692,19 +720,24 @@ export default function NewPurchaseOrderPage() {
     return new Intl.NumberFormat('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
   };
 
+  // Drafts panel hook
+  const { ToggleButton: DraftsToggle, Panel: DraftsPanel } = useDraftsPanel({
+    drafts,
+    onEdit: (id) => loadOrderForEdit(id, user?.parentUserId || user?.id),
+    onDelete: handleDeleteDraft,
+    formatCurrency,
+    type: 'purchase',
+    orderNoField: 'po_no',
+    entityField: 'suppliers',
+    entityNameField: 'supplier_name',
+  });
+
   // Prepare dropdown options
   const supplierOptions = suppliers.map(s => ({ value: s.id.toString(), label: s.supplier_name }));
   const productOptions = products.map(p => ({ value: p.id.toString(), label: p.name }));
 
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
-
   return (
+    <ProtectedRoute requiredPermission="purchase_order_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-4">
         {/* Header */}
@@ -715,64 +748,30 @@ export default function NewPurchaseOrderPage() {
             </h1>
             <p className="text-sm text-neutral-500">Create a new purchase order</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowDrafts(!showDrafts)}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-medium",
-              "border border-neutral-200/60",
-              "transition-all duration-200",
-              "flex items-center gap-1.5",
-              showDrafts ? "bg-neutral-900 text-white" : "bg-white text-neutral-700 hover:bg-neutral-50"
-            )}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            Drafts ({drafts.length})
-          </button>
+          <div className="flex items-center gap-2">
+            {DraftsToggle}
+            <button
+              type="button"
+              onClick={() => router.push('/purchases')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium",
+                "border border-neutral-200/60",
+                "bg-white text-neutral-700 hover:bg-neutral-50",
+                "transition-all duration-200",
+                "flex items-center gap-1.5"
+              )}
+            >
+              <History className="w-3.5 h-3.5" />
+              History
+            </button>
+          </div>
         </div>
 
         {/* Drafts Section */}
-        {showDrafts && drafts.length > 0 && (
-          <div className={cn(
-            "bg-white/80 backdrop-blur-xl rounded-xl",
-            "border border-neutral-200/60",
-            "shadow-[0_4px_20px_rgba(0,0,0,0.04)]",
-            "p-3"
-          )}>
-            <h3 className="text-xs font-semibold text-neutral-700 mb-2">Saved Drafts</h3>
-            <div className="space-y-1.5 max-h-40 overflow-y-auto">
-              {drafts.map(draft => (
-                <div key={draft.id} className="flex items-center justify-between p-2 bg-neutral-50/80 rounded-lg">
-                  <div className="flex-1">
-                    <div className="text-xs font-medium text-neutral-900">{draft.po_no}</div>
-                    <div className="text-[10px] text-neutral-500">
-                      {draft.suppliers?.supplier_name || 'No supplier'} • {formatCurrency(draft.total_amount)}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => loadOrderForEdit(draft.id, user.id)}
-                      className="p-1 text-neutral-500 hover:text-neutral-900 rounded transition-all"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteDraft(draft.id)}
-                      className="p-1 text-neutral-500 hover:text-red-500 rounded transition-all"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {DraftsPanel}
 
         {/* Form */}
-        <form onSubmit={(e) => handleSubmit(e, 'pending', true)}>
+        <form onSubmit={(e) => handleSubmit(e, 'pending', true)} autoComplete="off">
           <div className={cn(
             "bg-white/80 backdrop-blur-xl rounded-xl",
             "border border-neutral-200/60",
@@ -806,10 +805,10 @@ export default function NewPurchaseOrderPage() {
                   onChange={(val) => setFormData(prev => ({ ...prev, supplier_id: val }))}
                   placeholder="Select Supplier"
                   searchPlaceholder="Search supplier..."
-                  onQuickAdd={handleQuickAddSupplier}
-                  quickAddLabel="Add supplier"
-                  onOpenAddModal={handleOpenAddSupplierModal}
-                  addModalLabel="Add New Supplier"
+                  onQuickAdd={canAddSupplier ? handleQuickAddSupplier : undefined}
+                  quickAddLabel={canAddSupplier ? "Add supplier" : undefined}
+                  onOpenAddModal={canAddSupplier ? handleOpenAddSupplierModal : undefined}
+                  addModalLabel={canAddSupplier ? "Add New Supplier" : undefined}
                 />
               </div>
 
@@ -892,11 +891,14 @@ export default function NewPurchaseOrderPage() {
                   <thead className="bg-neutral-50/80">
                     <tr>
                       <th className="px-3 py-3 text-left font-medium text-neutral-600 w-8">#</th>
-                      <th className="px-3 py-3 text-left font-medium text-neutral-600" style={{ width: '40%' }}>Product</th>
-                      <th className="px-3 py-3 text-left font-medium text-neutral-600 w-32">Category</th>
-                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-24">QTY</th>
-                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-28">Price</th>
-                      <th className="px-3 py-3 text-right font-medium text-neutral-600 w-32">Amount</th>
+                      <th className="px-3 py-3 text-left font-medium text-neutral-600" style={{ width: '28%' }}>Product</th>
+                      <th className="px-3 py-3 text-left font-medium text-neutral-600 w-24">Category</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">Unit</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">QTY</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-16">Weight</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-20">Net Wt.</th>
+                      <th className="px-3 py-3 text-center font-medium text-neutral-600 w-20">Price</th>
+                      <th className="px-3 py-3 text-right font-medium text-neutral-600 w-24">Amount</th>
                       <th className="px-2 py-3 w-10"></th>
                     </tr>
                   </thead>
@@ -911,16 +913,19 @@ export default function NewPurchaseOrderPage() {
                             onChange={(val) => handleProductChange(index, val)}
                             placeholder="Select Product"
                             searchPlaceholder="Search product..."
-                            onQuickAdd={(name) => handleQuickAddProduct(name, index)}
-                            quickAddLabel="Add product"
+                            onQuickAdd={canAddProduct ? (name) => handleQuickAddProduct(name, index) : undefined}
+                            quickAddLabel={canAddProduct ? "Add product" : undefined}
                             allowClear={false}
                             className="text-sm"
-                            onOpenAddModal={(searchQuery) => handleOpenAddProductModal(searchQuery, index)}
-                            addModalLabel="Add New Product"
+                            onOpenAddModal={canAddProduct ? (searchQuery) => handleOpenAddProductModal(searchQuery, index) : undefined}
+                            addModalLabel={canAddProduct ? "Add New Product" : undefined}
                           />
                         </td>
                         <td className="px-3 py-2.5">
                           <span className="text-xs text-neutral-500 truncate block">{item.category || '-'}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <span className="text-xs text-neutral-600 text-center block">{item.unit || '-'}</span>
                         </td>
                         <td className="px-2 py-2.5">
                           <input
@@ -928,7 +933,7 @@ export default function NewPurchaseOrderPage() {
                             value={item.quantity}
                             onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
                             className={cn(
-                              "w-full px-2.5 py-2 text-sm text-center",
+                              "w-full px-2 py-2 text-sm text-center",
                               "bg-white border border-neutral-200/60 rounded-lg",
                               "focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
                               "transition-all duration-200"
@@ -937,12 +942,18 @@ export default function NewPurchaseOrderPage() {
                           />
                         </td>
                         <td className="px-2 py-2.5">
+                          <span className="text-xs text-neutral-600 text-center block">{parseFloat(item.weight || 0).toFixed(2)}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <span className="text-xs font-medium text-neutral-700 text-center block">{(parseFloat(item.quantity || 0) * parseFloat(item.weight || 0)).toFixed(2)}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
                           <input
                             type="number"
                             value={item.unit_price}
                             onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
                             className={cn(
-                              "w-full px-2.5 py-2 text-sm text-center",
+                              "w-full px-2 py-2 text-sm text-center",
                               "bg-white border border-neutral-200/60 rounded-lg",
                               "focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
                               "transition-all duration-200"
@@ -987,7 +998,7 @@ export default function NewPurchaseOrderPage() {
             </div>
 
             {/* Totals & Actions */}
-            <div className="grid grid-cols-6 gap-3 mb-5">
+            <div className="grid grid-cols-7 gap-3 mb-5">
               <div className="bg-neutral-50/80 border border-neutral-200/60 rounded-xl p-3 text-center">
                 <div className="text-xs text-neutral-500 uppercase font-medium">Subtotal</div>
                 <div className="text-sm font-semibold text-neutral-900 mt-1">{formatCurrency(subtotal)}</div>
@@ -999,6 +1010,10 @@ export default function NewPurchaseOrderPage() {
               <div className="bg-neutral-900 rounded-xl p-3 text-center">
                 <div className="text-xs text-neutral-400 uppercase font-medium">Total</div>
                 <div className="text-sm font-semibold text-white mt-1">{formatCurrency(total)}</div>
+              </div>
+              <div className="bg-amber-50/80 border border-amber-200/60 rounded-xl p-3 text-center">
+                <div className="text-xs text-amber-600 uppercase font-medium">Net Weight</div>
+                <div className="text-sm font-semibold text-amber-700 mt-1">{totalNetWeight.toFixed(2)} kg</div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">Status</label>
@@ -1055,7 +1070,7 @@ export default function NewPurchaseOrderPage() {
               />
             </div>
 
-            {/* Action Buttons - 5 buttons */}
+            {/* Action Buttons */}
             <div className="flex gap-2">
               <button
                 type="button"
@@ -1092,22 +1107,6 @@ export default function NewPurchaseOrderPage() {
                 {saving ? 'Saving...' : 'Save & Print'}
               </button>
               <button
-                type="submit"
-                disabled={saving}
-                className={cn(
-                  "flex-1 px-3 py-2.5 rounded-xl font-medium text-sm",
-                  "bg-gradient-to-br from-emerald-500 to-teal-600 text-white",
-                  "shadow-lg shadow-emerald-500/20",
-                  "hover:from-emerald-600 hover:to-teal-700",
-                  "transition-all duration-200",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
-                  "flex items-center justify-center gap-2"
-                )}
-              >
-                <Download className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Save & Download'}
-              </button>
-              <button
                 type="button"
                 onClick={(e) => handleSubmit(e, 'pending', false)}
                 disabled={saving}
@@ -1121,7 +1120,7 @@ export default function NewPurchaseOrderPage() {
                 )}
               >
                 <Save className="w-4 h-4" />
-                Save Order
+                {saving ? 'Saving...' : 'Save Order'}
               </button>
               <button
                 type="button"
@@ -1242,7 +1241,10 @@ export default function NewPurchaseOrderPage() {
                       <tr>
                         <th className="px-4 py-3 text-left text-sm font-semibold">#</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold">Product</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold">Unit</th>
                         <th className="px-4 py-3 text-center text-sm font-semibold">Qty</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold">Weight</th>
+                        <th className="px-4 py-3 text-center text-sm font-semibold">Net Wt.</th>
                         <th className="px-4 py-3 text-right text-sm font-semibold">Price</th>
                         <th className="px-4 py-3 text-right text-sm font-semibold">Amount</th>
                       </tr>
@@ -1257,7 +1259,10 @@ export default function NewPurchaseOrderPage() {
                               <div className="text-xs text-neutral-500">{item.category}</div>
                             )}
                           </td>
+                          <td className="px-4 py-3 text-center text-sm text-neutral-600">{item.unit || '-'}</td>
                           <td className="px-4 py-3 text-center text-sm text-neutral-700">{item.quantity}</td>
+                          <td className="px-4 py-3 text-center text-sm text-neutral-600">{parseFloat(item.weight || 0).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-center text-sm text-neutral-700">{(parseFloat(item.quantity || 0) * parseFloat(item.weight || 0)).toFixed(2)}</td>
                           <td className="px-4 py-3 text-right text-sm text-neutral-700">Rs {formatCurrency(item.unit_price)}</td>
                           <td className="px-4 py-3 text-right text-sm font-semibold text-neutral-900">Rs {formatCurrency(item.quantity * item.unit_price)}</td>
                         </tr>
@@ -1268,7 +1273,7 @@ export default function NewPurchaseOrderPage() {
 
                 {/* Totals */}
                 <div className="flex justify-end">
-                  <div className="w-72 space-y-2">
+                  <div className="w-80 space-y-2">
                     <div className="flex justify-between py-2 border-b border-neutral-200">
                       <span className="text-sm text-neutral-600">Subtotal</span>
                       <span className="text-sm font-semibold text-neutral-900">Rs {formatCurrency(subtotal)}</span>
@@ -1276,6 +1281,10 @@ export default function NewPurchaseOrderPage() {
                     <div className="flex justify-between py-2 border-b border-neutral-200">
                       <span className="text-sm text-neutral-600">GST ({formData.gst_percentage}%)</span>
                       <span className="text-sm font-semibold text-blue-600">Rs {formatCurrency(gstAmount)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-neutral-200">
+                      <span className="text-sm text-neutral-600">Total Net Weight</span>
+                      <span className="text-sm font-semibold text-amber-600">{totalNetWeight.toFixed(2)} kg</span>
                     </div>
                     <div className="flex justify-between py-3 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-lg px-4 -mx-4">
                       <span className="text-sm font-semibold text-white">Total</span>
@@ -1328,5 +1337,6 @@ export default function NewPurchaseOrderPage() {
         </div>
       )}
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

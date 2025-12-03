@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
@@ -11,9 +11,10 @@ import SaleOrderViewModal from '@/components/sales/SaleOrderViewModal';
 import SaleOrderEditModal from '@/components/sales/SaleOrderEditModal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { notify, useConfirm } from '@/components/ui/Notifications';
-import { Eye, Download, Trash2, ChevronLeft, ChevronRight, Edit3, Search, X, FileSpreadsheet, FileText, Plus, Receipt, TrendingUp, Calendar, Users, Printer } from 'lucide-react';
+import { Eye, Download, Trash2, ChevronLeft, ChevronRight, Edit3, Search, X, FileSpreadsheet, FileText, Plus, Receipt, TrendingUp, Calendar, Users, Printer, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { downloadInvoicePDF, downloadSaleOrderPDF } from '@/components/sales/InvoicePDF';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export default function SalesPage() {
   const router = useRouter();
@@ -35,6 +36,13 @@ export default function SalesPage() {
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
   const itemsPerPage = 10;
 
+  // Permission checks
+  // Note: Sale orders use sales_invoice permissions for edit/delete since they're related
+  const { hasPermission, isSuperadmin } = usePermissions();
+  const canAddSaleOrder = isSuperadmin || hasPermission('sales_order_add');
+  const canEditSaleOrder = isSuperadmin || hasPermission('sales_invoice_edit');
+  const canDeleteSaleOrder = isSuperadmin || hasPermission('sales_invoice_delete');
+
   useEffect(() => {
     fetchUser();
   }, []);
@@ -45,7 +53,8 @@ export default function SalesPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        const userId = data.user.id || data.user.userId;
+        // Use parentUserId for data queries (staff sees parent account data)
+        const userId = data.user.parentUserId || data.user.id || data.user.userId;
         fetchSales(userId);
         fetchCustomers(userId);
         fetchSettings(userId);
@@ -135,22 +144,23 @@ export default function SalesPage() {
 
   async function handleDownloadPDF(sale) {
     try {
-      // Fetch order items with category
+      // Fetch order items with category and units
       const { data: items, error } = await supabase
         .from('sale_order_items')
         .select(`
           *,
-          products (name, categories(name))
+          products (name, categories(name), units(symbol, name))
         `)
         .eq('order_id', sale.id);
 
       if (error) throw error;
 
-      // Format items for PDF with category
+      // Format items for PDF with category and unit
       const formattedItems = (items || []).map(item => ({
         ...item,
         product_name: item.product_name || item.products?.name || 'Unknown Product',
-        category: item.products?.categories?.name || ''
+        category: item.products?.categories?.name || '',
+        unit: item.unit || item.products?.units?.symbol || item.products?.units?.name || 'PCS'
       }));
 
       await downloadSaleOrderPDF(sale, formattedItems, settings, { showLogo: true });
@@ -167,7 +177,7 @@ export default function SalesPage() {
         .from('sale_order_items')
         .select(`
           *,
-          products (name, categories(name))
+          products (name, categories(name), units(symbol, name))
         `)
         .eq('order_id', sale.id);
 
@@ -176,7 +186,8 @@ export default function SalesPage() {
       const formattedItems = (items || []).map(item => ({
         ...item,
         product_name: item.product_name || item.products?.name || 'Unknown Product',
-        category: item.products?.categories?.name || ''
+        category: item.products?.categories?.name || '',
+        unit: item.unit || item.products?.units?.symbol || item.products?.units?.name || 'PCS'
       }));
 
       await downloadSaleOrderPDF(sale, formattedItems, settings, { showLogo: true }, true);
@@ -297,15 +308,8 @@ export default function SalesPage() {
     ...customers.map(c => ({ value: c.id.toString(), label: c.customer_name }))
   ];
 
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
-
   return (
+    <ProtectedRoute requiredPermission="sales_order_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-5">
         {/* Header */}
@@ -368,16 +372,18 @@ export default function SalesPage() {
                 </>
               )}
             </div>
-            <button
-              onClick={() => router.push('/sales/sale-order')}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all",
-                "bg-neutral-900 text-white hover:bg-neutral-800"
-              )}
-            >
-              <Plus className="w-4 h-4" />
-              New Sale
-            </button>
+            {canAddSaleOrder && (
+              <button
+                onClick={() => router.push('/sales/sale-order')}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all",
+                  "bg-neutral-900 text-white hover:bg-neutral-800"
+                )}
+              >
+                <Plus className="w-4 h-4" />
+                New Sale
+              </button>
+            )}
           </div>
         </div>
 
@@ -560,16 +566,18 @@ export default function SalesPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleEditOrder(sale.id)}
-                            className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              "text-neutral-600 hover:text-amber-600 hover:bg-amber-50"
-                            )}
-                            title="Edit order"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
+                          {canEditSaleOrder && (
+                            <button
+                              onClick={() => handleEditOrder(sale.id)}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-amber-600 hover:bg-amber-50"
+                              )}
+                              title="Edit order"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleDownloadPDF(sale)}
                             className={cn(
@@ -590,16 +598,18 @@ export default function SalesPage() {
                           >
                             <Printer className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleDelete(sale.id)}
-                            className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              "text-neutral-600 hover:text-red-600 hover:bg-red-50"
-                            )}
-                            title="Delete sale"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canDeleteSaleOrder && (
+                            <button
+                              onClick={() => handleDelete(sale.id)}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-red-600 hover:bg-red-50"
+                              )}
+                              title="Delete sale"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -699,5 +709,6 @@ export default function SalesPage() {
         cancelText="Cancel"
       />
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }

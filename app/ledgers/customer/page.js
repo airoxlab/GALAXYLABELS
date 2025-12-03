@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
@@ -43,7 +42,8 @@ export default function CustomerLedgerPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
-        const userId = data.user.id || data.user.userId;
+        // Use parentUserId for data queries (staff sees parent account data)
+        const userId = data.user.parentUserId || data.user.id || data.user.userId;
         fetchCustomers(userId);
         fetchSettings(userId);
       }
@@ -408,14 +408,6 @@ export default function CustomerLedgerPage() {
   const totalCustomers = customers.length;
   const totalOutstanding = customers.reduce((sum, c) => sum + (parseFloat(c.current_balance) || 0), 0);
   const customersWithBalance = customers.filter(c => (parseFloat(c.current_balance) || 0) > 0).length;
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>

@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -12,10 +11,11 @@ import Table, { TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { formatDate } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { notify } from '@/components/ui/Notifications';
+import { Loader2 } from 'lucide-react';
 
 export default function StockPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const [loadingData, setLoadingData] = useState(true);
   const [stockIn, setStockIn] = useState([]);
   const [stockOut, setStockOut] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -54,7 +54,7 @@ export default function StockPage() {
       console.error('Error fetching stock:', error);
       notify.error('Error loading stock data');
     } finally {
-      setLoading(false);
+      setLoadingData(false);
     }
   }
 
@@ -72,14 +72,6 @@ export default function StockPage() {
 
     return matchesSearch && matchesType && matchesDateFrom && matchesDateTo;
   });
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>
@@ -146,9 +138,13 @@ export default function StockPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Total Stock In</p>
-                <p className="text-2xl font-bold text-green-600">
-                  {stockIn.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0).toFixed(2)}
-                </p>
+                {loadingData ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-green-600 mt-2" />
+                ) : (
+                  <p className="text-2xl font-bold text-green-600">
+                    {stockIn.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0).toFixed(2)}
+                  </p>
+                )}
               </div>
               <div className="bg-green-100 dark:bg-green-900/20 p-3 rounded-full">
                 <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -162,9 +158,13 @@ export default function StockPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Total Stock Out</p>
-                <p className="text-2xl font-bold text-red-600">
-                  {stockOut.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0).toFixed(2)}
-                </p>
+                {loadingData ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-red-600 mt-2" />
+                ) : (
+                  <p className="text-2xl font-bold text-red-600">
+                    {stockOut.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0).toFixed(2)}
+                  </p>
+                )}
               </div>
               <div className="bg-red-100 dark:bg-red-900/20 p-3 rounded-full">
                 <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -178,12 +178,16 @@ export default function StockPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Net Stock</p>
-                <p className="text-2xl font-bold text-blue-600">
-                  {(
-                    stockIn.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0) -
-                    stockOut.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0)
-                  ).toFixed(2)}
-                </p>
+                {loadingData ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-blue-600 mt-2" />
+                ) : (
+                  <p className="text-2xl font-bold text-blue-600">
+                    {(
+                      stockIn.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0) -
+                      stockOut.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0)
+                    ).toFixed(2)}
+                  </p>
+                )}
               </div>
               <div className="bg-blue-100 dark:bg-blue-900/20 p-3 rounded-full">
                 <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -195,7 +199,12 @@ export default function StockPage() {
         </div>
 
         {/* Stock Transactions Table */}
-        {filteredStock.length === 0 ? (
+        {loadingData ? (
+          <Card className="p-12 text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-gray-400 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Loading transactions...</p>
+          </Card>
+        ) : filteredStock.length === 0 ? (
           <Card className="p-12 text-center">
             <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />

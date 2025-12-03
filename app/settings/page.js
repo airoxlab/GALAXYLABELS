@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageSkeleton } from '@/components/ui/Skeleton';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -25,6 +24,8 @@ import {
   Eye,
   EyeOff,
   X,
+  Ruler,
+  FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -35,6 +36,8 @@ import {
   InvoicePrefixSection,
   CurrencySection,
   AccountSection,
+  UnitsSection,
+  CategoriesSection,
 } from '@/components/settings';
 
 // Fallback currencies list (used if database fetch fails)
@@ -160,10 +163,12 @@ export default function SettingsPage() {
       const data = await response.json();
       if (data.success) {
         setUser(data.user);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
         await loadCurrenciesFromDatabase();
-        await loadUserCurrencies(data.user.id);
-        await loadSettings(data.user.id);
-        await loadAccountData(data.user.id);
+        await loadUserCurrencies(dataUserId);
+        await loadSettings(dataUserId);
+        await loadAccountData(dataUserId);
       } else {
         router.push('/login');
       }
@@ -623,11 +628,11 @@ export default function SettingsPage() {
     }
 
     try {
-      // Insert into user_currencies table
+      // Insert into user_currencies table - use parentUserId for data queries
       const { data, error } = await supabase
         .from('user_currencies')
         .insert([{
-          user_id: user.id,
+          user_id: user.parentUserId || user.id,
           code: currency.code,
           name: currency.name,
           symbol: currency.symbol,
@@ -764,11 +769,11 @@ export default function SettingsPage() {
       const { data: existing } = await supabase
         .from('settings')
         .select('id')
-        .eq('user_id', user.id)
+        .eq('user_id', user.parentUserId || user.id)
         .single();
 
       const settingsData = {
-        user_id: user.id,
+        user_id: user.parentUserId || user.id,
         ...formData,
         ...invoicePrefixes,
         ...stockSettings,
@@ -920,6 +925,8 @@ export default function SettingsPage() {
     { id: 'stock', label: 'Stock', icon: Package },
     { id: 'images', label: 'Images', icon: Image },
     { id: 'account', label: 'Account', icon: User },
+    { id: 'units', label: 'Units', icon: Ruler },
+    { id: 'categories', label: 'Categories', icon: FolderOpen },
     ...(isSuperadmin ? [{ id: 'access', label: 'Manage Access', icon: Shield }] : []),
   ];
 
@@ -927,14 +934,6 @@ export default function SettingsPage() {
   const currencyOptions = availableCurrencies
     .filter(c => !selectedCurrencies.find(sc => sc.code === c.code))
     .map(c => ({ value: c.code, label: `${c.code} - ${c.name}` }));
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <PageSkeleton />
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>
@@ -957,7 +956,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} autoComplete="off">
           <div className="flex gap-4" style={{ minHeight: 'calc(100vh - 140px)' }}>
             {/* Sidebar */}
             <div className={cn(
@@ -1169,6 +1168,16 @@ export default function SettingsPage() {
                   onToggleNewPassword={() => setShowNewPassword(!showNewPassword)}
                   onToggleConfirmPassword={() => setShowConfirmPassword(!showConfirmPassword)}
                 />
+              )}
+
+              {/* Units Section */}
+              {activeSection === 'units' && (
+                <UnitsSection userId={user?.parentUserId || user?.id} />
+              )}
+
+              {/* Categories Section */}
+              {activeSection === 'categories' && (
+                <CategoriesSection userId={user?.parentUserId || user?.id} />
               )}
 
               {/* Manage Access Section - Only visible to superadmins */}
@@ -1397,7 +1406,7 @@ function StaffFormModal({ title, formData, setFormData, showPassword, setShowPas
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="p-4 space-y-3">
+        <form onSubmit={onSubmit} className="p-4 space-y-3" autoComplete="off">
           <div>
             <label className="block text-[10px] font-medium text-neutral-700 mb-1">
               Name *

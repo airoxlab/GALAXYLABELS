@@ -30,8 +30,16 @@ export async function GET(request) {
       );
     }
 
-    console.log('User authenticated successfully:', user.username, 'type:', user.userType);
-    return NextResponse.json({ success: true, user });
+    // Add parentUserId for data queries:
+    // - For superadmin: parentUserId = their own ID
+    // - For staff: parentUserId = user_id from staff table (parent account)
+    const userWithParentId = {
+      ...user,
+      parentUserId: user.userType === 'staff' ? user.user_id : user.id
+    };
+
+    console.log('User authenticated successfully:', user.username, 'type:', user.userType, 'parentUserId:', userWithParentId.parentUserId);
+    return NextResponse.json({ success: true, user: userWithParentId });
   } catch (error) {
     console.error('Auth check error:', error);
     return NextResponse.json(

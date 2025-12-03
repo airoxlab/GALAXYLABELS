@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -34,11 +34,44 @@ import {
   BookOpen,
 } from "lucide-react";
 
+// Icon mapping for consistent rendering
+const menuIcons = {
+  Dashboard: <LayoutDashboard className="w-5 h-5" />,
+  Sales: <Receipt className="w-5 h-5" />,
+  Purchases: <ShoppingCart className="w-5 h-5" />,
+  Products: <Package className="w-5 h-5" />,
+  Customers: <Users className="w-5 h-5" />,
+  Suppliers: <Building2 className="w-5 h-5" />,
+  Stock: <Archive className="w-5 h-5" />,
+  Warehouses: <Warehouse className="w-5 h-5" />,
+  Payments: <DollarSign className="w-5 h-5" />,
+  Ledgers: <BookOpen className="w-5 h-5" />,
+  Expenses: <CreditCard className="w-5 h-5" />,
+  Reports: <FileText className="w-5 h-5" />,
+  Settings: <Settings className="w-5 h-5" />,
+};
+
+const subMenuIcons = {
+  "New Sale Order": <Receipt className="w-4 h-4" />,
+  "Sales Order History": <ClipboardList className="w-4 h-4" />,
+  "New Purchase Order": <Plus className="w-4 h-4" />,
+  "Purchase History": <ClipboardList className="w-4 h-4" />,
+  "Stock In": <ArrowDownToLine className="w-4 h-4" />,
+  "Stock Out": <ArrowUpFromLine className="w-4 h-4" />,
+  "Stock Availability": <BarChart3 className="w-4 h-4" />,
+  "Low Stock": <AlertTriangle className="w-4 h-4" />,
+  "Payment In": <ArrowDownRight className="w-4 h-4" />,
+  "Payment Out": <ArrowUpRight className="w-4 h-4" />,
+  "Payment History": <History className="w-4 h-4" />,
+  "Customer Ledger": <Users className="w-4 h-4" />,
+  "Supplier Ledger": <Building2 className="w-4 h-4" />,
+};
+
 // Menu items with permission requirements
 const getMenuItems = (hasPermission) => [
   {
     title: "Dashboard",
-    icon: <LayoutDashboard className="w-5 h-5" />,
+    icon: menuIcons.Dashboard,
     href: "/dashboard",
     // Dashboard is always visible
   },
@@ -204,31 +237,42 @@ const getMenuItems = (hasPermission) => [
   },
 ];
 
+// Default menu items for initial render (all authorized, will be updated after auth loads)
+const getDefaultMenuItems = () => getMenuItems(() => true).map(item => ({
+  ...item,
+  isAuthorized: true,
+  visibleSubItems: item.subItems || []
+}));
+
 export default function Sidebar({ isOpen, onClose, companySettings }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading } = useAuth();
   const { hasPermission, isSuperadmin, permissions } = usePermissions();
   const [expandedMenus, setExpandedMenus] = useState({});
-  const [visibleMenuItems, setVisibleMenuItems] = useState([]);
-
-  // Debug: Log permissions
-  useEffect(() => {
-    console.log('Sidebar - User:', user);
-    console.log('Sidebar - Is Superadmin:', isSuperadmin);
-    console.log('Sidebar - Permissions:', permissions);
-    console.log('Sidebar - Loading:', loading);
-  }, [user, isSuperadmin, permissions, loading]);
+  // Initialize with default menu items to prevent flashing empty sidebar
+  const [visibleMenuItems, setVisibleMenuItems] = useState(() => {
+    // Try to get cached menu from sessionStorage for instant render
+    if (typeof window !== 'undefined') {
+      const cached = sessionStorage.getItem('sidebarMenuCache');
+      if (cached) {
+        try {
+          return JSON.parse(cached);
+        } catch (e) {
+          // Invalid cache, use defaults
+        }
+      }
+    }
+    return getDefaultMenuItems();
+  });
+  const hasInitialized = useRef(false);
 
   // Calculate menu items when auth state changes
   useEffect(() => {
-    // Don't calculate menu until auth is loaded
-    if (loading) {
-      console.log('Sidebar - Still loading auth, skipping menu calculation');
+    // Don't recalculate if still loading, unless we haven't initialized yet
+    if (loading && hasInitialized.current) {
       return;
     }
-
-    console.log('Sidebar - Calculating menu items with isSuperadmin:', isSuperadmin, 'permissions:', permissions);
 
     // Get menu items with permission filtering
     const menuItems = getMenuItems(hasPermission);
@@ -237,52 +281,70 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
     const processedItems = menuItems.map(item => {
       // Always allow Dashboard
       if (!item.permission) {
-        return { ...item, isAuthorized: true };
+        return { ...item, isAuthorized: true, visibleSubItems: item.subItems || [] };
       }
 
       // Check if user has permission
       const isAuthorized = item.permission ? item.permission() : true;
-
-      // Debug logging
-      console.log(`Menu item "${item.title}" - isAuthorized:`, isAuthorized);
 
       // If has subitems, filter them
       let visibleSubItems = [];
       if (item.subItems) {
         visibleSubItems = item.subItems.filter(subItem => {
           if (!subItem.permission) return true;
-          const hasSubPermission = subItem.permission();
-          console.log(`  Sub-item "${subItem.title}" - hasPermission:`, hasSubPermission);
-          return hasSubPermission;
+          return subItem.permission();
         });
       }
 
       return { ...item, isAuthorized, visibleSubItems };
     });
 
-    console.log('Sidebar - Processed menu items:', processedItems.map(i => ({ title: i.title, isAuthorized: i.isAuthorized })));
     setVisibleMenuItems(processedItems);
+    hasInitialized.current = true;
+
+    // Cache menu items for instant render on next navigation
+    if (typeof window !== 'undefined' && !loading) {
+      // Store a simplified version (without functions) for caching
+      const cacheableItems = processedItems.map(item => ({
+        title: item.title,
+        href: item.href,
+        isAuthorized: item.isAuthorized,
+        visibleSubItems: (item.visibleSubItems || []).map(sub => ({
+          title: sub.title,
+          href: sub.href
+        }))
+      }));
+      sessionStorage.setItem('sidebarMenuCache', JSON.stringify(cacheableItems));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperadmin, permissions, loading]);
 
-  // Auto-expand submenus when a submenu page is active
+  // Auto-expand submenus when a submenu page is active - only run on pathname change
   useEffect(() => {
-    visibleMenuItems.forEach((item) => {
-      if (item.visibleSubItems && item.visibleSubItems.length > 0) {
-        const isSubItemActive = item.visibleSubItems.some(
+    // Find which parent menu should be expanded based on current pathname
+    const menuItems = getMenuItems(() => true);
+    menuItems.forEach((item) => {
+      if (item.subItems && item.subItems.length > 0) {
+        const isSubItemActive = item.subItems.some(
           (subItem) => pathname === subItem.href || pathname?.startsWith(subItem.href + '/')
         );
-        if (isSubItemActive) {
-          setExpandedMenus((prev) => ({
-            ...prev,
-            [item.title]: true,
-          }));
+        if (isSubItemActive && !expandedMenus[item.title]) {
+          setExpandedMenus((prev) => ({ ...prev, [item.title]: true }));
         }
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
   const handleLogout = async () => {
     try {
+      // Clear all cached data before logout
+      sessionStorage.removeItem('authUserCache');
+      sessionStorage.removeItem('authUserTypeCache');
+      sessionStorage.removeItem('authPermissionsCache');
+      sessionStorage.removeItem('sidebarMenuCache');
+      localStorage.removeItem('companySettings');
+
       const response = await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'include',
@@ -335,17 +397,17 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
       >
         <div className="h-full flex flex-col relative overflow-hidden">
           {/* Logo Section */}
-          <div className="py-4 px-4 border-b border-slate-200/60 bg-gradient-to-br from-neutral-800 via-neutral-900 to-neutral-950">
+          <div className="py-4 px-4 border-b border-slate-200/60 bg-white">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-white/15 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg">
+              <div className="w-11 h-11 bg-neutral-800 rounded-xl flex items-center justify-center">
                 <Building2 className="w-6 h-6 text-white" />
               </div>
               <div className="flex-1 min-w-0">
-                <h1 className="text-base font-bold text-white tracking-wide truncate">
+                <h1 className="text-base font-bold text-slate-800 tracking-wide truncate">
                   {companySettings?.company_name || 'Company Name'}
                 </h1>
                 {user?.email && (
-                  <p className="text-xs text-white/70 truncate">{user.email}</p>
+                  <p className="text-xs text-slate-500 truncate">{user.email}</p>
                 )}
               </div>
             </div>
@@ -358,6 +420,8 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                 const hasSubItems = item.visibleSubItems && item.visibleSubItems.length > 0;
                 const isExpanded = expandedMenus[item.title];
                 const isItemActive = isActive(item.href);
+                // Always get icon from mapping to handle cached items without icons
+                const itemIcon = menuIcons[item.title] || item.icon;
 
                 return (
                   <div key={item.title}>
@@ -378,7 +442,7 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                             "transition-colors flex-shrink-0",
                             isItemActive ? "text-white" : "text-slate-400"
                           )}>
-                            {item.icon}
+                            {itemIcon}
                           </span>
                           <div className="flex flex-col items-start flex-1 min-w-0">
                             <span className="text-sm font-medium">
@@ -419,7 +483,7 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                             "transition-colors",
                             isItemActive ? "text-white" : "text-slate-400"
                           )}>
-                            {item.icon}
+                            {itemIcon}
                           </span>
                           <span className="text-sm font-medium">{item.title}</span>
                         </Link>
@@ -431,7 +495,7 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                           )}
                         >
                           <span className="transition-colors text-slate-400">
-                            {item.icon}
+                            {itemIcon}
                           </span>
                           <div className="flex flex-col items-start flex-1">
                             <span className="text-sm font-medium">{item.title}</span>
@@ -446,26 +510,24 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                     {/* Sub-menu items */}
                     {hasSubItems && isExpanded && (
                       <div className="ml-3 mt-0.5 space-y-0.5">
-                        {item.visibleSubItems.map((subItem) => (
-                          <Link
-                            key={subItem.href}
-                            href={subItem.href}
-                            onClick={() => {
-                              if (window.innerWidth < 1024) {
-                                onClose();
-                              }
-                            }}
-                            className={cn(
-                              "flex items-center gap-2 px-3 py-1.5 pl-9 rounded-lg text-sm transition-all duration-200",
-                              pathname === subItem.href
-                                ? "bg-neutral-100 text-neutral-900 font-medium"
-                                : "text-slate-500 hover:bg-slate-100/70 hover:text-slate-700"
-                            )}
-                          >
-                            {subItem.icon && <span className={pathname === subItem.href ? "text-neutral-700" : ""}>{subItem.icon}</span>}
-                            {subItem.title}
-                          </Link>
-                        ))}
+                        {item.visibleSubItems.map((subItem) => {
+                          const subIcon = subMenuIcons[subItem.title] || subItem.icon;
+                          return (
+                            <Link
+                              key={subItem.href}
+                              href={subItem.href}
+                              className={cn(
+                                "flex items-center gap-2 px-3 py-1.5 pl-9 rounded-lg text-sm transition-all duration-200",
+                                pathname === subItem.href
+                                  ? "bg-neutral-100 text-neutral-900 font-medium"
+                                  : "text-slate-500 hover:bg-slate-100/70 hover:text-slate-700"
+                              )}
+                            >
+                              {subIcon && <span className={pathname === subItem.href ? "text-neutral-700" : ""}>{subIcon}</span>}
+                              {subItem.title}
+                            </Link>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

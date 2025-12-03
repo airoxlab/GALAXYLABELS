@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import PurchaseDrawer from '@/components/purchases/PurchaseDrawer';
 import PurchaseViewModal from '@/components/purchases/PurchaseViewModal';
 import PurchaseEditModal from '@/components/purchases/PurchaseEditModal';
@@ -34,6 +35,7 @@ import {
 } from 'lucide-react';
 import SearchableDropdown from '@/components/ui/SearchableDropdown';
 import { downloadPurchaseOrderPDF, generatePurchasesReportPDF } from '@/components/purchases/PurchasePDF';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export default function PurchasesPage() {
   const router = useRouter();
@@ -56,6 +58,12 @@ export default function PurchasesPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
 
+  // Permission checks
+  const { hasPermission, isSuperadmin } = usePermissions();
+  const canAddPurchaseOrder = isSuperadmin || hasPermission('purchase_order_add');
+  const canEditPurchaseOrder = isSuperadmin || hasPermission('purchase_edit');
+  const canDeletePurchaseOrder = isSuperadmin || hasPermission('purchase_delete');
+
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
@@ -71,11 +79,13 @@ export default function PurchasesPage() {
       });
       const data = await response.json();
       if (data.success && data.user) {
-        setUserId(data.user.id);
-        fetchPurchaseOrders(data.user.id);
-        fetchSuppliers(data.user.id);
-        fetchProducts(data.user.id);
-        fetchSettings(data.user.id);
+        // Use parentUserId for data queries (staff sees parent account data)
+        const dataUserId = data.user.parentUserId || data.user.id;
+        setUserId(dataUserId);
+        fetchPurchaseOrders(dataUserId);
+        fetchSuppliers(dataUserId);
+        fetchProducts(dataUserId);
+        fetchSettings(dataUserId);
       }
     } catch (error) {
       console.error('Error fetching user:', error);
@@ -398,7 +408,7 @@ export default function PurchasesPage() {
       if (error) throw error;
 
       await downloadPurchaseOrderPDF(po, items || [], settings, { showLogo: true, showQR: true }, true);
-      notify.success('Opening print dialog...');
+      notify.success('Opening PDF preview...');
     } catch (error) {
       console.error('Error printing PDF:', error);
       notify.error(`Error printing PDF: ${error.message}`);
@@ -551,6 +561,7 @@ export default function PurchasesPage() {
   };
 
   return (
+    <ProtectedRoute requiredPermission="purchase_order_view" showUnauthorized>
     <DashboardLayout>
       <div className="space-y-4">
         {/* Header */}
@@ -594,13 +605,13 @@ export default function PurchasesPage() {
                     "shadow-lg",
                     "overflow-hidden"
                   )}>
-                    <button
+                    {/* <button
                       onClick={handleExportPDF}
                       className="w-full flex items-center gap-3 px-4 py-3 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
                     >
                       <FileText className="w-4 h-4 text-red-500" />
                       Export as PDF
-                    </button>
+                    </button> */}
                     <button
                       onClick={handleExportExcel}
                       className="w-full flex items-center gap-3 px-4 py-3 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
@@ -612,16 +623,18 @@ export default function PurchasesPage() {
                 </>
               )}
             </div>
-            <button
-              onClick={handleAddNew}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all",
-                "bg-neutral-900 text-white hover:bg-neutral-800"
-              )}
-            >
-              <Plus className="w-4 h-4" />
-              New Purchase
-            </button>
+            {canAddPurchaseOrder && (
+              <button
+                onClick={handleAddNew}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all",
+                  "bg-neutral-900 text-white hover:bg-neutral-800"
+                )}
+              >
+                <Plus className="w-4 h-4" />
+                New Purchase
+              </button>
+            )}
           </div>
         </div>
 
@@ -841,13 +854,15 @@ export default function PurchasesPage() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleViewEdit(po)}
-                            className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                            title="Edit purchase order"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
+                          {canEditPurchaseOrder && (
+                            <button
+                              onClick={() => handleViewEdit(po)}
+                              className="p-1.5 text-neutral-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                              title="Edit purchase order"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleDownloadPDF(po)}
                             className="p-1.5 text-neutral-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
@@ -862,13 +877,15 @@ export default function PurchasesPage() {
                           >
                             <Printer className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => handleDelete(po.id)}
-                            className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                            title="Delete purchase order"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canDeletePurchaseOrder && (
+                            <button
+                              onClick={() => handleDelete(po.id)}
+                              className="p-1.5 text-neutral-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                              title="Delete purchase order"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1004,5 +1021,6 @@ export default function PurchasesPage() {
         userId={userId}
       />
     </DashboardLayout>
+    </ProtectedRoute>
   );
 }
