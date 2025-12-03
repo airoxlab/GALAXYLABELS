@@ -33,7 +33,7 @@ export default function SalesPage() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState(null);
-  const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
+  const { confirmState, showConfirm, showDeleteConfirm, hideConfirm } = useConfirm();
   const itemsPerPage = 10;
 
   // Permission checks
@@ -67,7 +67,8 @@ export default function SalesPage() {
 
   async function fetchSales(userId) {
     try {
-      const { data, error } = await supabase
+      // Fetch sale orders
+      const { data: orders, error: ordersError } = await supabase
         .from('sale_orders')
         .select(`
           *,
@@ -79,8 +80,34 @@ export default function SalesPage() {
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setSales(data || []);
+      if (ordersError) throw ordersError;
+
+      // Fetch all invoices to check which orders have been converted
+      const { data: invoices, error: invoicesError } = await supabase
+        .from('sales_invoices')
+        .select('order_id, invoice_no')
+        .eq('user_id', userId);
+
+      if (invoicesError) throw invoicesError;
+
+      // Create a map of order_id to invoice info
+      const invoiceMap = {};
+      if (invoices) {
+        invoices.forEach(inv => {
+          if (inv.order_id) {
+            invoiceMap[inv.order_id] = inv;
+          }
+        });
+      }
+
+      // Add invoice info to orders
+      const ordersWithInvoiceInfo = orders.map(order => ({
+        ...order,
+        hasInvoice: !!invoiceMap[order.id],
+        invoiceNo: invoiceMap[order.id]?.invoice_no
+      }));
+
+      setSales(ordersWithInvoiceInfo || []);
     } catch (error) {
       console.error('Error fetching sales:', error);
     } finally {
@@ -213,7 +240,16 @@ export default function SalesPage() {
     setEditingOrderId(null);
   }
 
-  async function handleConvertToInvoice(sale) {
+  function handleConvertToInvoice(sale) {
+    showConfirm({
+      title: 'Convert to Invoice',
+      message: `Are you sure you want to convert sale order "${sale.order_no}" to an invoice? This action cannot be undone.`,
+      type: 'warning',
+      onConfirm: () => performConvertToInvoice(sale)
+    });
+  }
+
+  async function performConvertToInvoice(sale) {
     try {
       const userId = user.parentUserId || user.id;
 
@@ -614,12 +650,29 @@ export default function SalesPage() {
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
                   {currentSales.map((sale) => (
-                    <tr key={sale.id} className="hover:bg-neutral-50 transition-colors">
+                    <tr key={sale.id} className={cn(
+                      "transition-colors",
+                      sale.hasInvoice
+                        ? "bg-emerald-50/40 hover:bg-emerald-50/60"
+                        : "hover:bg-neutral-50"
+                    )}>
                       <td className="py-3 px-4">
                         <span className="text-sm text-neutral-700">{formatDate(sale.order_date)}</span>
                       </td>
                       <td className="py-3 px-4">
-                        <span className="text-sm font-medium text-neutral-900">{sale.order_no || '-'}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-neutral-900">{sale.order_no || '-'}</span>
+                          {sale.hasInvoice && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              Invoice
+                            </span>
+                          )}
+                        </div>
+                        {sale.hasInvoice && sale.invoiceNo && (
+                          <div className="text-xs text-emerald-700 mt-0.5">
+                            {sale.invoiceNo}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <div className="text-sm font-medium text-neutral-900">
@@ -668,11 +721,14 @@ export default function SalesPage() {
                           )}
                           <button
                             onClick={() => handleConvertToInvoice(sale)}
+                            disabled={sale.hasInvoice}
                             className={cn(
                               "p-1.5 rounded-lg transition-colors",
-                              "text-neutral-600 hover:text-indigo-600 hover:bg-indigo-50"
+                              sale.hasInvoice
+                                ? "text-neutral-300 cursor-not-allowed"
+                                : "text-neutral-600 hover:text-indigo-600 hover:bg-indigo-50"
                             )}
-                            title="Convert to Invoice"
+                            title={sale.hasInvoice ? "Already converted to invoice" : "Convert to Invoice"}
                           >
                             <Receipt className="w-4 h-4" />
                           </button>
@@ -802,8 +858,8 @@ export default function SalesPage() {
         onConfirm={confirmState.onConfirm}
         title={confirmState.title}
         message={confirmState.message}
-        type="danger"
-        confirmText="Delete"
+        type={confirmState.type}
+        confirmText={confirmState.type === 'danger' ? 'Delete' : 'Convert'}
         cancelText="Cancel"
       />
     </DashboardLayout>
