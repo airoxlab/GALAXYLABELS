@@ -107,6 +107,7 @@ export default function NewPurchaseOrderPage() {
             name,
             unit_price,
             weight,
+            available_stock,
             category_id,
             unit_id,
             categories (
@@ -741,7 +742,10 @@ export default function NewPurchaseOrderPage() {
 
   // Prepare dropdown options
   const supplierOptions = suppliers.map(s => ({ value: s.id.toString(), label: s.supplier_name }));
-  const productOptions = products.map(p => ({ value: p.id.toString(), label: p.name }));
+  const productOptions = products.map(p => ({
+    value: p.id.toString(),
+    label: `${p.name} (Stock: ${p.available_stock || 0})`
+  }));
 
   return (
     <ProtectedRoute requiredPermission="purchase_order_view" showUnauthorized>

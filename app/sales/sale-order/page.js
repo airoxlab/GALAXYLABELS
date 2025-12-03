@@ -114,6 +114,7 @@ export default function NewSaleOrderPage() {
             name,
             unit_price,
             weight,
+            available_stock,
             category_id,
             unit_id,
             categories (
@@ -746,7 +747,10 @@ export default function NewSaleOrderPage() {
 
   // Prepare dropdown options
   const customerOptions = customers.map(c => ({ value: c.id.toString(), label: c.customer_name }));
-  const productOptions = products.map(p => ({ value: p.id.toString(), label: p.name }));
+  const productOptions = products.map(p => ({
+    value: p.id.toString(),
+    label: `${p.name} (Stock: ${p.available_stock || 0})`
+  }));
 
   return (
     <ProtectedRoute requiredPermission="sales_order_view" showUnauthorized>
