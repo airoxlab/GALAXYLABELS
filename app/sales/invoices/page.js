@@ -496,19 +496,6 @@ export default function SalesInvoicesPage() {
             <h1 className="text-xl font-semibold text-neutral-900 tracking-tight">Sales Invoices</h1>
             <p className="text-sm text-neutral-500">Manage your sales invoices</p>
           </div>
-          <button
-            onClick={handleOpenConvertModal}
-            className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium",
-              "bg-neutral-900 text-white",
-              "hover:bg-neutral-800",
-              "transition-all duration-200",
-              "flex items-center gap-2"
-            )}
-          >
-            <Plus className="w-4 h-4" />
-            Convert Sale Order to Invoice
-          </button>
         </div>
 
         <div className="bg-white/80 backdrop-blur-xl rounded-xl border border-neutral-200/60 p-3 shadow-sm">
@@ -560,6 +547,7 @@ export default function SalesInvoicesPage() {
                   <tr className="bg-neutral-50">
                     <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Invoice No</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">FBR Invoice No</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Customer PO</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Customer</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-neutral-700">Date</th>
                     <th className="text-right py-3 px-4 text-sm font-semibold text-neutral-700">Total</th>
@@ -575,6 +563,9 @@ export default function SalesInvoicesPage() {
                       </td>
                       <td className="py-3 px-4">
                         <span className="text-sm text-neutral-600">{invoice.fbr_invoice_no || '-'}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm text-neutral-600">{invoice.customer_po || '-'}</span>
                       </td>
                       <td className="py-3 px-4">
                         <div>

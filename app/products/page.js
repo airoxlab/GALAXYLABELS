@@ -496,6 +496,9 @@ export default function ProductsPage() {
                   <th className="py-3 px-4 text-left text-sm font-semibold text-neutral-700">
                     Unit
                   </th>
+                  <th className="py-3 px-4 text-center text-sm font-semibold text-neutral-700">
+                    Quantity
+                  </th>
                   <th className="py-3 px-4 text-right text-sm font-semibold text-neutral-700">
                     Price
                   </th>
@@ -507,7 +510,7 @@ export default function ProductsPage() {
               <tbody className="divide-y divide-neutral-100">
                 {currentProducts.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="px-6 py-12 text-center">
+                    <td colSpan="6" className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <div className="w-16 h-16 bg-neutral-100 rounded-2xl flex items-center justify-center mb-4">
                           <Package className="w-8 h-8 text-neutral-400" />
@@ -546,6 +549,15 @@ export default function ProductsPage() {
                             <span className="text-xs text-neutral-400 ml-1">({product.units.symbol})</span>
                           )}
                         </div>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className={`text-sm font-medium ${
+                          (product.available_stock || 0) <= (product.min_stock_level || 0)
+                            ? 'text-red-600'
+                            : 'text-neutral-900'
+                        }`}>
+                          {product.available_stock || 0}
+                        </span>
                       </td>
                       <td className="py-3 px-4 text-right">
                         <span className="text-sm font-semibold text-neutral-900">{formatCurrency(product.unit_price)}</span>
