@@ -103,7 +103,7 @@ export default function NewSaleOrderPage() {
       const [customersRes, productsRes] = await Promise.all([
         supabase
           .from('customers')
-          .select('id, customer_name')
+          .select('id, customer_name, current_balance')
           .eq('user_id', userId)
           .eq('is_active', true)
           .order('customer_name'),
@@ -1020,7 +1020,7 @@ export default function NewSaleOrderPage() {
             </div>
 
             {/* Totals & Actions */}
-            <div className="grid grid-cols-5 gap-3 mb-5">
+            <div className="grid grid-cols-6 gap-3 mb-5">
               <div className="bg-neutral-50/80 border border-neutral-200/60 rounded-xl p-3 text-center">
                 <div className="text-xs text-neutral-500 uppercase font-medium">Subtotal</div>
                 <div className="text-sm font-semibold text-neutral-900 mt-1">{formatCurrency(subtotal)}</div>
@@ -1033,6 +1033,12 @@ export default function NewSaleOrderPage() {
                 <div className="text-xs text-neutral-400 uppercase font-medium">Total</div>
                 <div className="text-sm font-semibold text-white mt-1">{formatCurrency(total)}</div>
               </div>
+              {selectedCustomer && (
+                <div className="bg-amber-50/80 border border-amber-200/60 rounded-xl p-3 text-center">
+                  <div className="text-xs text-amber-600 uppercase font-medium">Balance</div>
+                  <div className="text-sm font-semibold text-amber-700 mt-1">{formatCurrency(selectedCustomer.current_balance || 0)}</div>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-neutral-700 mb-1.5">Status</label>
                 <select
