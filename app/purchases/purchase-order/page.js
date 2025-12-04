@@ -9,11 +9,60 @@ import toast from 'react-hot-toast';
 import { Plus, Trash2, Save, FileText, X, Download, Printer, Eye, Loader2, History } from 'lucide-react';
 import { useDraftsPanel } from '@/components/ui/DraftsPanel';
 import { useRouter } from 'next/navigation';
-import { downloadPurchaseOrderPDF } from '@/components/purchases/PurchasePDF';
+import { downloadPurchaseOrderPDF, generatePurchaseOrderPDF } from '@/components/purchases/PurchasePDF';
 import AddProductModal from '@/components/ui/AddProductModal';
 import AddSupplierModal from '@/components/ui/AddSupplierModal';
 import { usePermissions } from '@/hooks/usePermissions';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { isWhatsAppAvailable, sendPurchaseInvoiceWhatsApp } from '@/lib/whatsapp';
+
+// Auto-send WhatsApp helper function for purchase orders
+async function autoSendPurchaseWhatsApp(purchase, settings, userId) {
+  // Check if auto-send is enabled
+  if (!settings?.whatsapp_auto_send_purchase) return;
+
+  // Check if WhatsApp is available and connected
+  if (!isWhatsAppAvailable()) return;
+
+  try {
+    const status = await window.electron?.whatsapp?.getStatus();
+    if (!status?.isReady) return;
+
+    // Check if supplier has phone number
+    const supplierPhone = purchase.suppliers?.whatsapp_no || purchase.suppliers?.mobile_no;
+    if (!supplierPhone) return;
+
+    // Generate PDF if attachment is enabled
+    let pdfBase64 = null;
+    if (settings?.whatsapp_attach_invoice_image !== false) {
+      try {
+        const doc = await generatePurchaseOrderPDF(purchase, purchase.items || [], settings, { showLogo: true, showQR: false });
+        const pdfData = doc.output('datauristring');
+        pdfBase64 = pdfData.split(',')[1];
+      } catch (e) {
+        console.error('Error generating PDF for WhatsApp:', e);
+      }
+    }
+
+    // Send WhatsApp message
+    await sendPurchaseInvoiceWhatsApp({
+      purchase: { ...purchase, user_id: userId },
+      settings,
+      pdfBase64,
+      onSuccess: () => {
+        toast.success('Purchase Order sent via WhatsApp!', {
+          duration: 2000,
+          style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+        });
+      },
+      onError: (error) => {
+        console.error('Auto-send WhatsApp failed:', error);
+      }
+    });
+  } catch (error) {
+    console.error('Error in auto-send WhatsApp:', error);
+  }
+}
 
 export default function NewPurchaseOrderPage() {
   const router = useRouter();
@@ -642,6 +691,26 @@ export default function NewPurchaseOrderPage() {
       // Download PDF if requested
       if (shouldDownloadPdf && saveAs !== 'draft') {
         await handleDownloadPDF(order.id, shouldPrint);
+      }
+
+      // Auto-send WhatsApp if enabled (only for non-draft orders)
+      if (saveAs !== 'draft') {
+        // Fetch the full order with supplier data for WhatsApp
+        const { data: fullOrder } = await supabase
+          .from('purchase_orders')
+          .select('*, suppliers(supplier_name, mobile_no, whatsapp_no, current_balance)')
+          .eq('id', order.id)
+          .single();
+
+        if (fullOrder) {
+          const orderItems = validItems.map(item => ({
+            product_name: item.product_name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            total_price: parseFloat(item.quantity) * parseFloat(item.unit_price)
+          }));
+          await autoSendPurchaseWhatsApp({ ...fullOrder, items: orderItems }, settings, user.parentUserId || user.id);
+        }
       }
 
       // Set editing order ID so subsequent saves update this order

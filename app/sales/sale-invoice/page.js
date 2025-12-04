@@ -5,7 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
-import { Building2 } from 'lucide-react';
+import { Building2, Loader2 } from 'lucide-react';
+import { sendSalesInvoiceWhatsApp, generateInvoicePDFBase64, isWhatsAppAvailable } from '@/lib/whatsapp';
+import toast from 'react-hot-toast';
 
 // Constants
 const ITEMS_PER_PAGE = 9;
@@ -63,6 +65,7 @@ function SaleInvoiceContent() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
   const printRef = useRef(null);
 
   const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
@@ -154,11 +157,69 @@ function SaleInvoiceContent() {
     window.print();
   };
 
-  const handleWhatsApp = () => {
+  const handleWhatsApp = async () => {
     if (!invoice) return;
-    const message = `Invoice #${invoice.invoice_no}\nAmount: Rs. ${formatCurrency(invoice.total_amount)}\nDate: ${formatDate(invoice.invoice_date)}`;
-    const phone = invoice.customers?.mobile_no?.replace(/\D/g, '') || '';
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+
+    // Check if running in Electron with WhatsApp support
+    if (!isWhatsAppAvailable()) {
+      // Fallback to wa.me link for browser
+      const message = `Invoice #${invoice.invoice_no}\nAmount: Rs. ${formatCurrency(invoice.total_amount)}\nDate: ${formatDate(invoice.invoice_date)}`;
+      const phone = invoice.customers?.mobile_no?.replace(/\D/g, '') || '';
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+      return;
+    }
+
+    if (!invoice.customers?.mobile_no) {
+      toast.error('Customer does not have a phone number', {
+        duration: 2000,
+        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+      });
+      return;
+    }
+
+    setSendingWhatsApp(true);
+
+    try {
+      // Format items for PDF generation
+      const formattedItems = items.map(item => ({
+        ...item,
+        product_name: item.product_name || 'Unknown Product'
+      }));
+
+      // Generate PDF as base64 if attachment is enabled
+      let pdfBase64 = null;
+      if (settings?.whatsapp_attach_invoice_image !== false) {
+        pdfBase64 = await generateInvoicePDFBase64(invoice, formattedItems, settings);
+      }
+
+      // Send via WhatsApp
+      await sendSalesInvoiceWhatsApp({
+        invoice,
+        items: formattedItems,
+        settings,
+        pdfBase64,
+        onSuccess: () => {
+          toast.success('Invoice sent via WhatsApp!', {
+            duration: 2000,
+            style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+          });
+        },
+        onError: (error) => {
+          toast.error(error, {
+            duration: 3000,
+            style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+          });
+        },
+      });
+    } catch (error) {
+      console.error('Error sending WhatsApp:', error);
+      toast.error('Error sending via WhatsApp: ' + error.message, {
+        duration: 3000,
+        style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+      });
+    } finally {
+      setSendingWhatsApp(false);
+    }
   };
 
   const handleEmail = () => {
@@ -261,9 +322,20 @@ function SaleInvoiceContent() {
         <div className="no-print flex items-center justify-center mb-0 bg-neutral-700 overflow-hidden">
           <button
             onClick={handleWhatsApp}
-            className="flex-1 px-4 py-2.5 text-white text-[11px] font-medium hover:bg-neutral-600 border-r border-neutral-500 transition-colors uppercase tracking-wide"
+            disabled={sendingWhatsApp}
+            className={cn(
+              "flex-1 px-4 py-2.5 text-white text-[11px] font-medium border-r border-neutral-500 transition-colors uppercase tracking-wide flex items-center justify-center gap-2",
+              sendingWhatsApp ? "bg-green-600" : "hover:bg-neutral-600"
+            )}
           >
-            Whatsapp
+            {sendingWhatsApp ? (
+              <>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Sending...
+              </>
+            ) : (
+              'Whatsapp'
+            )}
           </button>
           <button
             onClick={handleEmail}

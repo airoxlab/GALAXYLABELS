@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import { Plus, Trash2, Save, FileText, X, Download, Receipt, Printer, Eye, Loader2 } from 'lucide-react';
 import { useDraftsPanel } from '@/components/ui/DraftsPanel';
 import { downloadInvoicePDF, downloadSaleOrderPDF } from '@/components/sales/InvoicePDF';
+import { isWhatsAppAvailable, sendSaleOrderWhatsApp, generateSaleOrderPDFBase64 } from '@/lib/whatsapp';
 import AddProductModal from '@/components/ui/AddProductModal';
 import AddCustomerModal from '@/components/ui/AddCustomerModal';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -428,6 +429,52 @@ export default function NewSaleOrderPage() {
     setFormData(prev => ({ ...prev, customer_id: customerData.id.toString() }));
   }
 
+  // Auto-send WhatsApp for sale orders
+  async function autoSendSaleOrderWhatsApp(order, items, currentSettings, userId) {
+    // Check if auto-send is enabled for sales
+    if (!currentSettings?.whatsapp_auto_send_sales) return;
+
+    // Check if WhatsApp is available
+    if (!isWhatsAppAvailable()) return;
+
+    try {
+      // Check if WhatsApp is connected
+      const status = await window.electron?.whatsapp?.getStatus();
+      if (!status?.isReady) return;
+
+      // Check if customer has phone number
+      const customerPhone = order.customers?.whatsapp_no || order.customers?.mobile_no;
+      if (!customerPhone) return;
+
+      // Generate PDF if attach setting is enabled
+      let pdfBase64 = null;
+      if (currentSettings?.whatsapp_attach_invoice_image !== false) {
+        pdfBase64 = await generateSaleOrderPDFBase64(order, items, currentSettings);
+      }
+
+      // Send WhatsApp message
+      const result = await sendSaleOrderWhatsApp({
+        order: { ...order, user_id: userId },
+        settings: currentSettings,
+        pdfBase64,
+        onSuccess: () => {
+          toast.success('WhatsApp message sent!', {
+            duration: 2000,
+            style: { background: '#171717', color: '#fff', borderRadius: '12px', fontSize: '14px' }
+          });
+        },
+        onError: (error) => {
+          console.error('Auto-send WhatsApp failed:', error);
+          // Don't show error toast for auto-send failures to not disrupt user flow
+        }
+      });
+
+      return result;
+    } catch (error) {
+      console.error('Error in auto-send WhatsApp:', error);
+    }
+  }
+
   async function handleSubmit(e, saveAs = 'finalized', shouldDownloadPdf = false, shouldPrint = false) {
     e.preventDefault();
     if (!user) return;
@@ -622,6 +669,20 @@ export default function NewSaleOrderPage() {
       // Download or Print PDF if requested
       if ((shouldDownloadPdf || shouldPrint) && saveAs === 'finalized' && order) {
         await handleDownloadPDF(order.id, shouldPrint);
+      }
+
+      // Auto-send WhatsApp if enabled (only for finalized orders)
+      if (saveAs === 'finalized' && order) {
+        // Fetch full order with customer data for WhatsApp
+        const { data: fullOrder } = await supabase
+          .from('sale_orders')
+          .select('*, customers(customer_name, mobile_no, whatsapp_no, current_balance)')
+          .eq('id', order.id)
+          .single();
+
+        if (fullOrder) {
+          await autoSendSaleOrderWhatsApp(fullOrder, orderItemsData, settings, user.parentUserId || user.id);
+        }
       }
 
       // Set editing order ID so subsequent saves update this order

@@ -12,7 +12,8 @@ import { notify } from '@/components/ui/Notifications';
 import {
   Search, X, ChevronLeft, ChevronRight,
   DollarSign, TrendingUp, TrendingDown, FileText,
-  ArrowDownCircle, ArrowUpCircle, Eye, Edit3, Trash2
+  ArrowDownCircle, ArrowUpCircle, Eye, Edit3, Trash2,
+  Printer, Share2, MoreVertical, Download
 } from 'lucide-react';
 import PaymentViewModal from '@/components/payments/PaymentViewModal';
 import PaymentEditDrawer from '@/components/payments/PaymentEditDrawer';
@@ -39,6 +40,7 @@ export default function PaymentHistoryPage() {
   const [showEditDrawer, setShowEditDrawer] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
   const { confirmState, showDeleteConfirm, hideConfirm } = useConfirm();
+  const [openActionMenu, setOpenActionMenu] = useState(null);
 
   useEffect(() => {
     fetchUser();
@@ -238,6 +240,52 @@ export default function PaymentHistoryPage() {
 
   function handlePaymentSaved() {
     if (user) fetchPayments(user.id);
+  }
+
+  async function handlePrint(payment) {
+    try {
+      // Get party details (customer or supplier)
+      let party = null;
+      if (payment.type === 'in') {
+        const { data } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('id', payment.party_id)
+          .single();
+        party = data;
+      } else {
+        const { data } = await supabase
+          .from('suppliers')
+          .select('*')
+          .eq('id', payment.party_id)
+          .single();
+        party = data;
+      }
+
+      // Get user settings
+      const userId = user.parentUserId || user.id;
+      const { data: settings } = await supabase
+        .from('settings')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      const { generatePaymentReceiptPDF } = await import('@/components/payments/PaymentPDF');
+      const doc = await generatePaymentReceiptPDF(payment, party, settings);
+
+      // Open print dialog
+      const pdfBlob = doc.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const printWindow = window.open(pdfUrl, '_blank');
+      if (printWindow) {
+        printWindow.onload = () => {
+          printWindow.print();
+        };
+      }
+    } catch (error) {
+      console.error('Error printing:', error);
+      notify.error('Error printing receipt');
+    }
   }
 
   async function handleDelete(payment) {
@@ -602,36 +650,48 @@ export default function PaymentHistoryPage() {
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1">
+                            {/* Print Button */}
                             <button
-                              onClick={() => handleViewDetails(payment)}
+                              onClick={() => handlePrint(payment)}
                               className={cn(
                                 "p-1.5 rounded-lg transition-colors",
-                                "text-neutral-600 hover:text-blue-600 hover:bg-blue-50"
+                                "text-neutral-600 hover:text-violet-600 hover:bg-violet-50"
                               )}
-                              title="View details"
+                              title="Print"
                             >
-                              <Eye className="w-4 h-4" />
+                              <Printer className="w-4 h-4" />
                             </button>
+
+                            {/* Share Button (Coming Soon) */}
                             <button
-                              onClick={() => handleEdit(payment)}
                               className={cn(
                                 "p-1.5 rounded-lg transition-colors",
-                                "text-neutral-600 hover:text-amber-600 hover:bg-amber-50"
+                                "text-neutral-400 cursor-not-allowed"
                               )}
-                              title="Edit payment"
+                              title="Share (Coming Soon)"
+                              disabled
                             >
-                              <Edit3 className="w-4 h-4" />
+                              <Share2 className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDelete(payment)}
-                              className={cn(
-                                "p-1.5 rounded-lg transition-colors",
-                                "text-neutral-600 hover:text-red-600 hover:bg-red-50"
-                              )}
-                              title="Delete payment"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+
+                            {/* More Actions Menu */}
+                            <div className="relative">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  const key = `${payment.type}-${payment.id}`;
+                                  setOpenActionMenu(openActionMenu?.key === key ? null : { key, id: payment.id, type: payment.type, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                                }}
+                                className={cn(
+                                  "p-1.5 rounded-lg transition-colors",
+                                  "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100"
+                                )}
+                                title="More actions"
+                              >
+                                <MoreVertical className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -741,6 +801,54 @@ export default function PaymentHistoryPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Actions Dropdown Portal */}
+      {openActionMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setOpenActionMenu(null)}
+          />
+          <div
+            className="fixed z-50 w-44 bg-white rounded-lg border border-neutral-200 shadow-lg overflow-hidden"
+            style={{ top: openActionMenu.top, right: openActionMenu.right }}
+          >
+            <button
+              onClick={() => {
+                const payment = currentPayments.find(p => p.id === openActionMenu.id && p.type === openActionMenu.type);
+                if (payment) handleViewDetails(payment);
+                setOpenActionMenu(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              View Details
+            </button>
+            <button
+              onClick={() => {
+                const payment = currentPayments.find(p => p.id === openActionMenu.id && p.type === openActionMenu.type);
+                if (payment) handleEdit(payment);
+                setOpenActionMenu(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+            >
+              <Edit3 className="w-4 h-4" />
+              Edit Payment
+            </button>
+            <button
+              onClick={() => {
+                const payment = currentPayments.find(p => p.id === openActionMenu.id && p.type === openActionMenu.type);
+                if (payment) handleDelete(payment);
+                setOpenActionMenu(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </button>
+          </div>
+        </>
       )}
     </DashboardLayout>
   );

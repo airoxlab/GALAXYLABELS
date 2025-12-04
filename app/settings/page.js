@@ -26,6 +26,7 @@ import {
   X,
   Ruler,
   FolderOpen,
+  MessageSquare,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -38,6 +39,8 @@ import {
   AccountSection,
   UnitsSection,
   CategoriesSection,
+  TransactionMessagesSection,
+  WhatsAppLogsSection,
 } from '@/components/settings';
 
 // Fallback currencies list (used if database fetch fails)
@@ -58,6 +61,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [user, setUser] = useState(null);
   const [activeSection, setActiveSection] = useState('company');
+  const [mounted, setMounted] = useState(false);
+
+  // Set mounted after hydration to avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Staff Management States
   const [staff, setStaff] = useState([]);
@@ -917,7 +926,7 @@ export default function SettingsPage() {
     }
   };
 
-  // Sidebar navigation items
+  // Sidebar navigation items - only add superadmin items after mount to avoid hydration mismatch
   const sidebarItems = [
     { id: 'company', label: 'Company Info', icon: Building2 },
     { id: 'invoices', label: 'Invoice Numbers', icon: FileText },
@@ -927,7 +936,9 @@ export default function SettingsPage() {
     { id: 'account', label: 'Account', icon: User },
     { id: 'units', label: 'Units', icon: Ruler },
     { id: 'categories', label: 'Categories', icon: FolderOpen },
-    ...(isSuperadmin ? [{ id: 'access', label: 'Manage Access', icon: Shield }] : []),
+    { id: 'messages', label: 'Transaction Messages', icon: MessageSquare },
+    { id: 'message-logs', label: 'Message Logs', icon: MessageSquare },
+    ...(mounted && isSuperadmin ? [{ id: 'access', label: 'Manage Access', icon: Shield }] : []),
   ];
 
   // Currency dropdown options
@@ -1180,8 +1191,18 @@ export default function SettingsPage() {
                 <CategoriesSection userId={user?.parentUserId || user?.id} />
               )}
 
+              {/* Transaction Messages Section */}
+              {activeSection === 'messages' && (
+                <TransactionMessagesSection userId={user?.parentUserId || user?.id} />
+              )}
+
+              {/* WhatsApp Message Logs Section */}
+              {activeSection === 'message-logs' && (
+                <WhatsAppLogsSection userId={user?.parentUserId || user?.id} />
+              )}
+
               {/* Manage Access Section - Only visible to superadmins */}
-              {activeSection === 'access' && isSuperadmin && (
+              {activeSection === 'access' && mounted && isSuperadmin && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>

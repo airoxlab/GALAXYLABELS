@@ -250,12 +250,13 @@ const getDefaultMenuItems = () => getMenuItems(() => true).map(item => ({
   visibleSubItems: item.subItems || []
 }));
 
-export default function Sidebar({ isOpen, onClose, companySettings }) {
+export default function Sidebar({ isOpen, onClose, companySettings, isCollapsed = false, isHiddenOnDesktop = false }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading } = useAuth();
   const { hasPermission, isSuperadmin, permissions } = usePermissions();
   const [expandedMenus, setExpandedMenus] = useState({});
+  const [hoveredItem, setHoveredItem] = useState(null);
   // Initialize with default menu items to prevent flashing empty sidebar
   const [visibleMenuItems, setVisibleMenuItems] = useState(() => {
     // Try to get cached menu from sessionStorage for instant render
@@ -327,6 +328,9 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
 
   // Auto-expand submenus when a submenu page is active - only run on pathname change
   useEffect(() => {
+    // Don't expand submenus in collapsed mode
+    if (isCollapsed) return;
+
     // Find which parent menu should be expanded based on current pathname
     const menuItems = getMenuItems(() => true);
     menuItems.forEach((item) => {
@@ -340,7 +344,7 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [pathname, isCollapsed]);
 
   const handleLogout = async () => {
     try {
@@ -385,10 +389,14 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
 
   return (
     <>
-      {/* Mobile Overlay */}
+      {/* Overlay - Shows on mobile, or on desktop when sidebar is hidden (settings page) */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden"
+          className={cn(
+            "fixed inset-0 bg-black/40 backdrop-blur-sm z-40",
+            // Always show overlay when sidebar is open and hidden on desktop
+            isHiddenOnDesktop ? "block" : "lg:hidden"
+          )}
           onClick={onClose}
         />
       )}
@@ -396,31 +404,53 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed top-0 left-0 z-50 h-screen transition-all duration-300 lg:translate-x-0 w-64",
+          "fixed top-0 left-0 z-50 h-screen transition-all duration-300",
           "bg-gradient-to-b from-slate-50 via-white to-slate-50/80 backdrop-blur-xl border-r border-slate-200/60",
-          isOpen ? "translate-x-0" : "-translate-x-full"
+          // Mobile/Hidden mode: hidden by default, shown when isOpen is true
+          isOpen ? "translate-x-0" : "-translate-x-full",
+          // Desktop: visible unless isHiddenOnDesktop is true (e.g., settings page)
+          !isHiddenOnDesktop && "lg:translate-x-0",
+          // Width based on collapsed state
+          isCollapsed ? "w-16" : "w-64"
         )}
       >
         <div className="h-full flex flex-col relative overflow-hidden">
           {/* Logo Section */}
-          <div className="py-4 px-4 border-b border-slate-200/60 bg-white">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-neutral-800 rounded-xl flex items-center justify-center">
-                <Building2 className="w-6 h-6 text-white" />
+          <div className={cn(
+            "py-4 border-b border-slate-200/60 bg-white",
+            isCollapsed ? "px-2" : "px-4"
+          )}>
+            <div className={cn(
+              "flex items-center",
+              isCollapsed ? "justify-center" : "gap-3"
+            )}>
+              <div className={cn(
+                "bg-neutral-800 rounded-xl flex items-center justify-center flex-shrink-0",
+                isCollapsed ? "w-10 h-10" : "w-11 h-11"
+              )}>
+                <Building2 className={cn(
+                  "text-white",
+                  isCollapsed ? "w-5 h-5" : "w-6 h-6"
+                )} />
               </div>
-              <div className="flex-1 min-w-0">
-                <h1 className="text-base font-bold text-slate-800 tracking-wide truncate">
-                  {companySettings?.company_name || 'Company Name'}
-                </h1>
-                {user?.email && (
-                  <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                )}
-              </div>
+              {!isCollapsed && (
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-base font-bold text-slate-800 tracking-wide truncate">
+                    {companySettings?.company_name || 'Company Name'}
+                  </h1>
+                  {user?.email && (
+                    <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto px-3 py-4 scrollbar-hide">
+          <nav className={cn(
+            "flex-1 overflow-y-auto py-4 scrollbar-hide",
+            isCollapsed ? "px-2" : "px-3"
+          )}>
             <div className="flex flex-col gap-0.5">
               {visibleMenuItems.map((item) => {
                 const hasSubItems = item.visibleSubItems && item.visibleSubItems.length > 0;
@@ -429,6 +459,48 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                 // Always get icon from mapping to handle cached items without icons
                 const itemIcon = menuIcons[item.title] || item.icon;
 
+                // Collapsed mode - show only icons with tooltips
+                if (isCollapsed) {
+                  return (
+                    <div key={item.title} className="relative">
+                      <Link
+                        href={item.href}
+                        onClick={() => {
+                          if (window.innerWidth < 1024) {
+                            onClose();
+                          }
+                        }}
+                        onMouseEnter={() => setHoveredItem(item.title)}
+                        onMouseLeave={() => setHoveredItem(null)}
+                        className={cn(
+                          "flex items-center justify-center p-2.5 rounded-lg transition-all duration-200",
+                          !item.isAuthorized && "opacity-60 cursor-not-allowed",
+                          isItemActive
+                            ? "bg-gradient-to-r from-neutral-800 to-neutral-900 text-white shadow-md shadow-neutral-500/20"
+                            : "text-slate-500 hover:bg-slate-100/80 hover:text-slate-700"
+                        )}
+                        title={item.title}
+                      >
+                        <span className={cn(
+                          "transition-colors",
+                          isItemActive ? "text-white" : ""
+                        )}>
+                          {itemIcon}
+                        </span>
+                      </Link>
+
+                      {/* Tooltip on hover */}
+                      {hoveredItem === item.title && (
+                        <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 z-50 px-2.5 py-1.5 bg-neutral-900 text-white text-xs font-medium rounded-lg whitespace-nowrap shadow-lg">
+                          {item.title}
+                          <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-neutral-900" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                // Full mode - show full menu
                 return (
                   <div key={item.title}>
                     {hasSubItems ? (
@@ -514,7 +586,7 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
                     )}
 
                     {/* Sub-menu items */}
-                    {hasSubItems && isExpanded && (
+                    {hasSubItems && isExpanded && !isCollapsed && (
                       <div className="ml-3 mt-0.5 space-y-0.5">
                         {item.visibleSubItems.map((subItem) => {
                           const subIcon = subMenuIcons[subItem.title] || subItem.icon;
@@ -543,19 +615,25 @@ export default function Sidebar({ isOpen, onClose, companySettings }) {
           </nav>
 
           {/* Footer */}
-          <div className="px-3 py-3 border-t border-slate-200/60 bg-gradient-to-r from-slate-50/50 to-white">
+          <div className={cn(
+            "py-3 border-t border-slate-200/60 bg-gradient-to-r from-slate-50/50 to-white",
+            isCollapsed ? "px-2" : "px-3"
+          )}>
             <button
               onClick={handleLogout}
               className={cn(
-                "w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg",
+                "w-full flex items-center rounded-lg",
                 "bg-slate-100/80 hover:bg-rose-50",
                 "text-slate-600 hover:text-rose-600",
                 "transition-all duration-200",
-                "text-sm font-medium"
+                isCollapsed
+                  ? "justify-center p-2.5"
+                  : "justify-center gap-2 px-3 py-2 text-sm font-medium"
               )}
+              title={isCollapsed ? "Logout" : undefined}
             >
               <LogOut className="w-4 h-4" />
-              Logout
+              {!isCollapsed && "Logout"}
             </button>
           </div>
         </div>

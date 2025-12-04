@@ -11,10 +11,11 @@ import SaleOrderViewModal from '@/components/sales/SaleOrderViewModal';
 import SaleOrderEditModal from '@/components/sales/SaleOrderEditModal';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { notify, useConfirm } from '@/components/ui/Notifications';
-import { Eye, Download, Trash2, ChevronLeft, ChevronRight, Edit3, Search, X, FileSpreadsheet, FileText, Plus, Receipt, TrendingUp, Calendar, Users, Printer, Loader2 } from 'lucide-react';
+import { Eye, Download, Trash2, ChevronLeft, ChevronRight, Edit3, Search, X, FileSpreadsheet, FileText, Plus, Receipt, TrendingUp, Calendar, Users, Printer, Loader2, Share2, MoreVertical } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { downloadInvoicePDF, downloadSaleOrderPDF } from '@/components/sales/InvoicePDF';
 import { usePermissions } from '@/hooks/usePermissions';
+import { isWhatsAppAvailable, sendSaleOrderWhatsApp, generateSaleOrderPDFBase64 } from '@/lib/whatsapp';
 
 export default function SalesPage() {
   const router = useRouter();
@@ -34,6 +35,9 @@ export default function SalesPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState(null);
   const { confirmState, showConfirm, showDeleteConfirm, hideConfirm } = useConfirm();
+  const [openActionMenu, setOpenActionMenu] = useState(null);
+  const [openShareMenu, setOpenShareMenu] = useState(null);
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(null);
   const itemsPerPage = 10;
 
   // Permission checks
@@ -74,7 +78,9 @@ export default function SalesPage() {
           *,
           customers (
             customer_name,
-            mobile_no
+            mobile_no,
+            whatsapp_no,
+            current_balance
           )
         `)
         .eq('user_id', userId)
@@ -221,6 +227,64 @@ export default function SalesPage() {
     } catch (error) {
       console.error('Error printing:', error);
       notify.error('Error printing: ' + error.message);
+    }
+  }
+
+  async function handleShareWhatsApp(sale) {
+    if (!isWhatsAppAvailable()) {
+      notify.error('WhatsApp is only available in the desktop app');
+      return;
+    }
+
+    // Check if customer has a phone number
+    const customerPhone = sale.customers?.whatsapp_no || sale.customers?.mobile_no;
+    if (!customerPhone) {
+      notify.error('Customer does not have a phone number');
+      return;
+    }
+
+    setSendingWhatsApp(sale.id);
+    setOpenShareMenu(null);
+
+    try {
+      // Fetch order items
+      const { data: items, error } = await supabase
+        .from('sale_order_items')
+        .select(`
+          *,
+          products (name, categories(name), units(symbol, name))
+        `)
+        .eq('order_id', sale.id);
+
+      if (error) throw error;
+
+      const formattedItems = (items || []).map(item => ({
+        ...item,
+        product_name: item.product_name || item.products?.name || 'Unknown Product',
+        category: item.products?.categories?.name || '',
+        unit: item.unit || item.products?.units?.symbol || item.products?.units?.name || 'PCS'
+      }));
+
+      // Generate PDF as base64
+      const pdfBase64 = await generateSaleOrderPDFBase64(sale, formattedItems, settings);
+
+      // Send WhatsApp message
+      await sendSaleOrderWhatsApp({
+        order: sale,
+        settings,
+        pdfBase64,
+        onSuccess: () => {
+          notify.success('Sale order sent via WhatsApp!');
+        },
+        onError: (error) => {
+          notify.error(error || 'Failed to send WhatsApp message');
+        }
+      });
+    } catch (error) {
+      console.error('Error sending WhatsApp:', error);
+      notify.error('Error sending WhatsApp: ' + error.message);
+    } finally {
+      setSendingWhatsApp(null);
     }
   }
 
@@ -697,51 +761,7 @@ export default function SalesPage() {
                       </td>
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <button
-                            onClick={() => handleViewDetails(sale)}
-                            className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              "text-neutral-600 hover:text-blue-600 hover:bg-blue-50"
-                            )}
-                            title="View details"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {canEditSaleOrder && (
-                            <button
-                              onClick={() => handleEditOrder(sale.id)}
-                              className={cn(
-                                "p-1.5 rounded-lg transition-colors",
-                                "text-neutral-600 hover:text-amber-600 hover:bg-amber-50"
-                              )}
-                              title="Edit order"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleConvertToInvoice(sale)}
-                            disabled={sale.hasInvoice}
-                            className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              sale.hasInvoice
-                                ? "text-neutral-300 cursor-not-allowed"
-                                : "text-neutral-600 hover:text-indigo-600 hover:bg-indigo-50"
-                            )}
-                            title={sale.hasInvoice ? "Already converted to invoice" : "Convert to Invoice"}
-                          >
-                            <Receipt className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDownloadPDF(sale)}
-                            className={cn(
-                              "p-1.5 rounded-lg transition-colors",
-                              "text-neutral-600 hover:text-emerald-600 hover:bg-emerald-50"
-                            )}
-                            title="Download PDF"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
+                          {/* Print Button */}
                           <button
                             onClick={() => handlePrint(sale)}
                             className={cn(
@@ -752,18 +772,52 @@ export default function SalesPage() {
                           >
                             <Printer className="w-4 h-4" />
                           </button>
-                          {canDeleteSaleOrder && (
+
+                          {/* Share Button with WhatsApp dropdown */}
+                          <div className="relative">
                             <button
-                              onClick={() => handleDelete(sale.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (sendingWhatsApp === sale.id) return;
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setOpenShareMenu(openShareMenu?.id === sale.id ? null : { id: sale.id, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                                setOpenActionMenu(null);
+                              }}
+                              disabled={sendingWhatsApp === sale.id}
                               className={cn(
                                 "p-1.5 rounded-lg transition-colors",
-                                "text-neutral-600 hover:text-red-600 hover:bg-red-50"
+                                sendingWhatsApp === sale.id
+                                  ? "text-green-500 bg-green-50"
+                                  : "text-neutral-600 hover:text-green-600 hover:bg-green-50"
                               )}
-                              title="Delete sale"
+                              title="Share"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              {sendingWhatsApp === sale.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Share2 className="w-4 h-4" />
+                              )}
                             </button>
-                          )}
+                          </div>
+
+                          {/* More Actions Menu */}
+                          <div className="relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setOpenActionMenu(openActionMenu?.id === sale.id ? null : { id: sale.id, top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                                setOpenShareMenu(null);
+                              }}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-colors",
+                                "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100"
+                              )}
+                              title="More actions"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -862,6 +916,105 @@ export default function SalesPage() {
         confirmText={confirmState.type === 'danger' ? 'Delete' : 'Convert'}
         cancelText="Cancel"
       />
+
+      {/* Share Dropdown Portal */}
+      {openShareMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setOpenShareMenu(null)}
+          />
+          <div
+            className="fixed z-50 w-48 bg-white rounded-lg border border-neutral-200 shadow-lg overflow-hidden"
+            style={{ top: openShareMenu.top, right: openShareMenu.right }}
+          >
+            <button
+              onClick={() => {
+                const sale = currentSales.find(s => s.id === openShareMenu.id);
+                if (sale) handleShareWhatsApp(sale);
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-neutral-700 hover:bg-green-50 transition-colors"
+            >
+              <svg className="w-5 h-5 text-green-500" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+              </svg>
+              Share to WhatsApp
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Actions Dropdown Portal */}
+      {openActionMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setOpenActionMenu(null)}
+          />
+          <div
+            className="fixed z-50 w-44 bg-white rounded-lg border border-neutral-200 shadow-lg overflow-hidden"
+            style={{ top: openActionMenu.top, right: openActionMenu.right }}
+          >
+            <button
+              onClick={() => {
+                const sale = currentSales.find(s => s.id === openActionMenu.id);
+                if (sale) handleViewDetails(sale);
+                setOpenActionMenu(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              View Details
+            </button>
+            {canEditSaleOrder && (
+              <button
+                onClick={() => {
+                  handleEditOrder(openActionMenu.id);
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+              >
+                <Edit3 className="w-4 h-4" />
+                Edit Order
+              </button>
+            )}
+            <button
+              onClick={() => {
+                const sale = currentSales.find(s => s.id === openActionMenu.id);
+                if (sale && !sale.hasInvoice) handleConvertToInvoice(sale);
+                setOpenActionMenu(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+            >
+              <Receipt className="w-4 h-4" />
+              Convert to Invoice
+            </button>
+            <button
+              onClick={() => {
+                const sale = currentSales.find(s => s.id === openActionMenu.id);
+                if (sale) handleDownloadPDF(sale);
+                setOpenActionMenu(null);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Download PDF
+            </button>
+            {canDeleteSaleOrder && (
+              <button
+                onClick={() => {
+                  handleDelete(openActionMenu.id);
+                  setOpenActionMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </DashboardLayout>
     </ProtectedRoute>
   );

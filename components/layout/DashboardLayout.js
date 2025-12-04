@@ -1,14 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 import ToastProvider from '@/components/ui/ToastProvider';
 import { Menu } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [companySettings, setCompanySettings] = useState(() => {
@@ -19,6 +21,10 @@ export default function DashboardLayout({ children }) {
     }
     return null;
   });
+
+  // Check if we're on the settings page to hide the sidebar completely
+  // Use useMemo to ensure consistent value during SSR and client render
+  const isSettingsPage = useMemo(() => pathname?.startsWith('/settings'), [pathname]);
 
   useEffect(() => {
     checkAuth();
@@ -59,16 +65,30 @@ export default function DashboardLayout({ children }) {
   return (
     <div className="min-h-screen bg-[#fafafa]">
       <ToastProvider />
-      <Sidebar
-        isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
-        companySettings={companySettings}
-      />
+
+      {/* Only render sidebar if NOT on settings page, or if sidebar is open */}
+      {(!isSettingsPage || isSidebarOpen) && (
+        <Sidebar
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+          companySettings={companySettings}
+          isCollapsed={false}
+          isHiddenOnDesktop={isSettingsPage}
+        />
+      )}
 
       {/* Main Content Area */}
-      <div className="min-h-screen transition-all duration-300 lg:ml-64">
-        {/* Mobile Header - Only shows hamburger menu on mobile */}
-        <div className="lg:hidden sticky top-0 z-30 px-4 py-3 bg-white/80 backdrop-blur-xl border-b border-neutral-200/60">
+      <div className={cn(
+        "min-h-screen transition-all duration-300",
+        // No left margin on settings page since sidebar is hidden
+        isSettingsPage ? "lg:ml-0" : "lg:ml-64"
+      )}>
+        {/* Header with hamburger - shows on mobile always, and on desktop for settings page */}
+        <div className={cn(
+          "sticky top-0 z-30 px-4 py-3 bg-white/80 backdrop-blur-xl border-b border-neutral-200/60",
+          // On settings page, always show the header. Otherwise, only on mobile
+          isSettingsPage ? "block" : "lg:hidden"
+        )}>
           <button
             onClick={() => setIsSidebarOpen(true)}
             className="p-2 hover:bg-neutral-100 rounded-xl transition-colors"

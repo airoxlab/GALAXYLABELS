@@ -445,6 +445,27 @@ export async function generatePurchaseOrderPDF(purchase, items, settings, option
 }
 
 /**
+ * Generate purchase order PDF as base64 for WhatsApp attachment
+ * @param {Object} purchase - Purchase order data
+ * @param {Array} items - Purchase order items
+ * @param {Object} settings - Company settings
+ * @returns {Promise<string>} - Base64 encoded PDF
+ */
+export async function generatePurchaseOrderPDFBase64(purchase, items, settings) {
+  try {
+    const doc = await generatePurchaseOrderPDF(purchase, items, settings, { showLogo: true });
+    // Get as base64
+    const pdfData = doc.output('datauristring');
+    // Extract just the base64 part
+    const base64 = pdfData.split(',')[1];
+    return base64;
+  } catch (error) {
+    console.error('Error generating PDF base64:', error);
+    return null;
+  }
+}
+
+/**
  * Generate and download a purchase order PDF
  * @param {Object} purchase - Purchase order data
  * @param {Array} items - Purchase order items

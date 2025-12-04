@@ -5,3 +5,6 @@ export { default as CurrencySection } from './CurrencySection';
 export { default as AccountSection } from './AccountSection';
 export { default as UnitsSection } from './UnitsSection';
 export { default as CategoriesSection } from './CategoriesSection';
+export { default as TransactionMessagesSection } from './TransactionMessagesSection';
+export { default as WhatsAppQRModal } from './WhatsAppQRModal';
+export { default as WhatsAppLogsSection } from './WhatsAppLogsSection';
